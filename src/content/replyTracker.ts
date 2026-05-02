@@ -12,6 +12,7 @@ function replyKey(conversationId: string, text: string): string {
 
 export function createReplyTracker() {
   const seenReplyHashes = new Set<string>()
+  const globallySeenReplyHashes = new Set<string>()
   const consumedMessageIds = new Set<string>()
 
   return {
@@ -22,9 +23,17 @@ export function createReplyTracker() {
       }
     },
 
+    seedGlobal(replies: string[]): void {
+      for (const reply of replies) {
+        const trimmed = reply.trim()
+        if (trimmed) globallySeenReplyHashes.add(String(hashStr(trimmed)))
+      }
+    },
+
     consumeIfNew(conversationId: string, reply: string): boolean {
       const trimmed = reply.trim()
       if (!trimmed) return false
+      if (globallySeenReplyHashes.has(String(hashStr(trimmed)))) return false
 
       const key = replyKey(conversationId, trimmed)
       if (seenReplyHashes.has(key)) return false

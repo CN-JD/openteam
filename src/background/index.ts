@@ -187,6 +187,13 @@ function getChatMessages(store: OpenTeamStore, chat: GroupChat): GroupMessage[] 
   return chat.messageIds.map(messageId => store.messagesById[messageId]).filter((message): message is GroupMessage => Boolean(message))
 }
 
+function getRoleReplyHistory(store: OpenTeamStore, chat: GroupChat, roleId: string, limit = 100): string[] {
+  return getChatMessages(store, chat)
+    .filter(message => message.type === 'assistant' && message.roleId === roleId && message.content.trim())
+    .slice(-limit)
+    .map(message => message.content)
+}
+
 function getChatStatusFromRoles(store: OpenTeamStore, chat: GroupChat): GroupChat['status'] {
   const roles = getChatRoles(store, chat)
   if (roles.length === 0) return 'draft'
@@ -219,6 +226,19 @@ function isRoleHistoryMessage(message: GroupMessage, roleId: string): boolean {
 
 function readPersonaLength(role: GroupRole): number {
   return (role.systemPrompt?.trim() || role.description?.trim() || role.name.trim()).length
+}
+
+function staleReplyReason(store: OpenTeamStore, chat: GroupChat, role: GroupRole, promptMessageId: string | undefined): string | undefined {
+  if (!promptMessageId) return 'missing-prompt-message-id'
+  if (role.lastPromptMessageId !== promptMessageId) return 'prompt-message-mismatch'
+
+  const userMessage = store.messagesById[promptMessageId]
+  if (!userMessage || userMessage.chatId !== chat.id || userMessage.type !== 'user') return 'prompt-message-not-found'
+
+  const deliveryStatus = userMessage.deliveryStatus?.[role.id]
+  if (deliveryStatus !== 'pending' && deliveryStatus !== 'sent') return `delivery-already-${deliveryStatus ?? 'missing'}`
+
+  return undefined
 }
 
 function isMeaningfulConversationId(value: string | undefined): value is string {
@@ -789,12 +809,12 @@ async function handleFrameRoleReady(message: RuntimeMessage, sender: chrome.runt
     updateConversation(role, readOptionalString(message.conversationUrl), readOptionalString(message.conversationId))
     chat.status = getChatStatusFromRoles(store, chat)
     chat.updatedAt = timestamp
-    return role
+    return { role, replyHistory: getRoleReplyHistory(store, chat, role.id) }
   })
 
-  log.info('frame-ready:store-updated', { chatId, roleId, roleName: result.name, status: result.status, binding: runtimeFrames.getByRole(chatId, roleId) })
+  log.info('frame-ready:store-updated', { chatId, roleId, roleName: result.role.name, status: result.role.status, replyHistoryCount: result.replyHistory.length, binding: runtimeFrames.getByRole(chatId, roleId) })
   await broadcastStoreUpdated(store)
-  return { ok: true, role: result, store }
+  return { ok: true, role: result.role, replyHistory: result.replyHistory, store }
 }
 
 async function handleConversationUpdated(message: RuntimeMessage, sender: chrome.runtime.MessageSender) {
@@ -874,6 +894,11 @@ async function handleRoleReply(message: RuntimeMessage, sender: chrome.runtime.M
   const { store, result } = await mutateStore(store => {
     const chat = requireChat(store, identity.chatId)
     const role = requireRole(store, chat.id, identity.roleId)
+    const staleReason = staleReplyReason(store, chat, role, promptMessageId)
+    if (staleReason) {
+      return { ignored: true as const, reason: staleReason, roleId: role.id, promptMessageId }
+    }
+
     updateConversation(role, readOptionalString(message.conversationUrl), readOptionalString(message.conversationId))
 
     const reply: GroupMessage = {
@@ -906,12 +931,17 @@ async function handleRoleReply(message: RuntimeMessage, sender: chrome.runtime.M
     if (!promptMessageId || role.lastPromptMessageId === promptMessageId) delete role.lastPromptMessageId
     chat.status = getChatStatusFromRoles(store, chat)
     chat.updatedAt = timestamp
-    return reply
+    return { ignored: false as const, reply }
   })
 
-  log.info('role-reply:stored', { chatId: result.chatId, roleId: result.roleId, replyMessageId: result.id })
+  if (result.ignored) {
+    log.warn('role-reply:ignored-stale', { ...identity, promptMessageId: result.promptMessageId, reason: result.reason })
+    return { ok: true, ignored: true, reason: result.reason, store }
+  }
+
+  log.info('role-reply:stored', { chatId: result.reply.chatId, roleId: result.reply.roleId, replyMessageId: result.reply.id })
   await broadcastStoreUpdated(store)
-  return { ok: true, message: result, store }
+  return { ok: true, message: result.reply, store }
 }
 
 async function handleRoleError(message: RuntimeMessage, sender: chrome.runtime.MessageSender) {

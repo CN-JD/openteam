@@ -297,6 +297,13 @@ function clearPromptReplyBaseline(): void {
   promptBaselineReplies.clear()
 }
 
+function seedStoredRoleReplies(replies: string[] | undefined): void {
+  const validReplies = (replies ?? []).map(reply => reply.trim()).filter(Boolean)
+  if (validReplies.length === 0) return
+  replyTracker.seedGlobal(validReplies)
+  log.debug('reply-history:seeded', { count: validReplies.length, conversationId: getConversationId() })
+}
+
 function isPromptBaselineReply(text: string, element: Element): boolean {
   const trimmed = text.trim()
   if (!trimmed) return true
@@ -1049,6 +1056,7 @@ function registerFrameRoleHandshake(): void {
       ok: boolean
       role?: TeamRole
       state?: TeamRoomState
+      replyHistory?: string[]
       error?: string
     }>({
       type: 'TEAM_FRAME_ROLE_READY',
@@ -1064,6 +1072,7 @@ function registerFrameRoleHandshake(): void {
           return
         }
 
+        seedStoredRoleReplies(response.replyHistory)
         assignRole({
           chatId,
           roleId: response.role.id,

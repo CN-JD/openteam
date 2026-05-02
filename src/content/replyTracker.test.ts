@@ -10,6 +10,15 @@ describe('createReplyTracker', () => {
     expect(tracker.consumeIfNew('conv-a', 'old answer 2')).toBe(false)
   })
 
+  it('does not report stored role replies after an iframe reload restores old DOM later', () => {
+    const tracker = createReplyTracker()
+    tracker.seedGlobal(['初始化时的旧回复'])
+
+    expect(tracker.consumeIfNewForMessage('conv-a', '初始化时的旧回复', 'msg-new')).toBe(false)
+    expect(tracker.consumeIfNewForMessage('conv-b', '初始化时的旧回复', 'msg-newer')).toBe(false)
+    expect(tracker.consumeIfNewForMessage('conv-a', '针对新消息的回复', 'msg-new')).toBe(true)
+  })
+
   it('reports a new reply once when Gemini rerenders history before the latest answer', () => {
     const tracker = createReplyTracker()
     tracker.seed('conv-a', ['old answer 1', 'old answer 2'])

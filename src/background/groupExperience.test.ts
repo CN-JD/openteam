@@ -392,14 +392,25 @@ describe('background group chat experience handlers', () => {
     const store = makeStore()
     store.currentChatId = 'chat-1'
     store.chatsById['chat-1'] = makeChat('chat-1')
-    store.chatsById['chat-2'] = makeChat('chat-2', ['role-2'])
+    store.chatsById['chat-2'] = { ...makeChat('chat-2', ['role-2']), messageIds: ['msg-user'], nextMessageSeq: 2, status: 'running' }
     store.chatOrder = ['chat-1', 'chat-2']
-    store.rolesById['role-2'] = makeRole('chat-2', 'role-2', '产品经理')
+    store.rolesById['role-2'] = makeRole('chat-2', 'role-2', '产品经理', { status: 'thinking', lastPromptMessageId: 'msg-user' })
+    store.messagesById['msg-user'] = {
+      id: 'msg-user',
+      chatId: 'chat-2',
+      seq: 1,
+      type: 'user',
+      content: '后台问题',
+      targetRoleIds: ['role-2'],
+      createdAt: 1,
+      status: 'sent',
+      deliveryStatus: { 'role-2': 'sent' },
+    }
     const harness = await setupBackground(store)
 
     const reply = await harness.invoke({ type: 'TEAM_ROLE_REPLY', chatId: 'chat-2', roleId: 'role-2', content: '后台回复', messageId: 'msg-user' }) as { ok: boolean; store: OpenTeamStore }
     expect(reply.ok).toBe(true)
-    const chatTwoMessageId = reply.store.chatsById['chat-2'].messageIds[0]
+    const chatTwoMessageId = reply.store.chatsById['chat-2'].messageIds[1]
     expect(reply.store.messagesById[chatTwoMessageId]).toMatchObject({ chatId: 'chat-2', type: 'assistant', content: '后台回复' })
     expect(reply.store.viewState?.chatHasNewMessageById?.['chat-2']).toBe(true)
 
@@ -521,6 +532,93 @@ describe('background group chat experience handlers', () => {
     expect(deleted.store.viewState?.chatHasNewMessageById?.['chat-1']).toBeUndefined()
     const snapshot = await harness.invoke({ type: 'GROUP_STORE_GET' }) as { bindings: unknown[] }
     expect(snapshot.bindings).toEqual([])
+  })
+
+  it('returns stored role replies during frame ready so reloaded iframes can ignore restored DOM history', async () => {
+    const store = makeStore()
+    store.currentChatId = 'chat-1'
+    store.chatsById['chat-1'] = { ...makeChat('chat-1', ['role-1', 'role-2']), messageIds: ['msg-1', 'msg-2', 'msg-3'], nextMessageSeq: 4 }
+    store.chatOrder = ['chat-1']
+    store.rolesById['role-1'] = makeRole('chat-1', 'role-1', '调查记者')
+    store.rolesById['role-2'] = makeRole('chat-1', 'role-2', '产品经理')
+    store.messagesById['msg-1'] = {
+      id: 'msg-1',
+      chatId: 'chat-1',
+      seq: 1,
+      type: 'assistant',
+      roleId: 'role-1',
+      roleName: '调查记者',
+      content: '初始化时的旧回复',
+      createdAt: 1,
+      status: 'received',
+    }
+    store.messagesById['msg-2'] = {
+      id: 'msg-2',
+      chatId: 'chat-1',
+      seq: 2,
+      type: 'assistant',
+      roleId: 'role-2',
+      roleName: '产品经理',
+      content: '其他角色的回复',
+      createdAt: 2,
+      status: 'received',
+    }
+    store.messagesById['msg-3'] = {
+      id: 'msg-3',
+      chatId: 'chat-1',
+      seq: 3,
+      type: 'user',
+      content: '用户问题',
+      targetRoleIds: ['role-1'],
+      createdAt: 3,
+      status: 'sent',
+    }
+    const harness = await setupBackground(store)
+
+    const ready = await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'role-1', hostTabId: 900 }) as { ok: boolean; replyHistory: string[] }
+
+    expect(ready.ok).toBe(true)
+    expect(ready.replyHistory).toEqual(['初始化时的旧回复'])
+  })
+
+  it('ignores stale role replies that do not match the current pending prompt', async () => {
+    const store = makeStore()
+    store.currentChatId = 'chat-1'
+    store.chatsById['chat-1'] = { ...makeChat('chat-1', ['role-1']), messageIds: ['msg-old', 'msg-current'], nextMessageSeq: 3, status: 'running' }
+    store.chatOrder = ['chat-1']
+    store.rolesById['role-1'] = makeRole('chat-1', 'role-1', '工程师', { status: 'thinking', lastPromptMessageId: 'msg-current' })
+    store.messagesById['msg-old'] = {
+      id: 'msg-old',
+      chatId: 'chat-1',
+      seq: 1,
+      type: 'user',
+      content: '初始化问题',
+      targetRoleIds: ['role-1'],
+      createdAt: 1,
+      status: 'received',
+      deliveryStatus: { 'role-1': 'received' },
+    }
+    store.messagesById['msg-current'] = {
+      id: 'msg-current',
+      chatId: 'chat-1',
+      seq: 2,
+      type: 'user',
+      content: '新的问题',
+      targetRoleIds: ['role-1'],
+      createdAt: 2,
+      status: 'sent',
+      deliveryStatus: { 'role-1': 'sent' },
+    }
+    const harness = await setupBackground(store)
+
+    const stale = await harness.invoke({ type: 'TEAM_ROLE_REPLY', chatId: 'chat-1', roleId: 'role-1', messageId: 'msg-old', content: '旧初始化回复' }) as { ok: boolean; ignored?: boolean; store: OpenTeamStore }
+
+    expect(stale.ok).toBe(true)
+    expect(stale.ignored).toBe(true)
+    expect(stale.store.chatsById['chat-1'].messageIds).toEqual(['msg-old', 'msg-current'])
+    expect(stale.store.messagesById['msg-current'].deliveryStatus?.['role-1']).toBe('sent')
+    expect(stale.store.rolesById['role-1'].status).toBe('thinking')
+    expect(stale.store.rolesById['role-1'].lastPromptMessageId).toBe('msg-current')
   })
 
   it('does not push the switched store back to the tab that already receives the command response', async () => {
