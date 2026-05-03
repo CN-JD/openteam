@@ -55,15 +55,29 @@ describe('background message handlers', () => {
     const sendPrompt = vi.fn()
     const routes = createMessageHandlers({
       broadcastStoreUpdated,
+      getChatStatusFromRoles: () => 'ready',
       log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() },
       newId: vi.fn((prefix: string) => `${prefix}-1`),
       now: vi.fn(() => 100),
-      runtimeFrames: { getByRole: vi.fn(() => binding) },
+      runtimeFrames: {
+        bind: vi.fn(),
+        getByAddress: vi.fn(),
+        getByRole: vi.fn(() => binding),
+      },
       sendError: vi.fn(),
       sendPrompt,
     })
 
-    expect(MESSAGE_ROUTE_TYPES).toEqual(['GROUP_ROLE_RETRY_REPLY', 'GROUP_MESSAGE_SEND'])
+    expect(MESSAGE_ROUTE_TYPES).toEqual([
+      'GROUP_ROLE_RETRY_REPLY',
+      'GROUP_MESSAGE_SEND',
+      'TEAM_FRAME_ROLE_READY',
+      'TEAM_ROLE_CONVERSATION_UPDATED',
+      'TEAM_SEND_ACK',
+      'TEAM_ROLE_STATUS',
+      'TEAM_ROLE_REPLY',
+      'TEAM_ROLE_ERROR',
+    ])
     expect(routes.map(route => route.type)).toEqual(MESSAGE_ROUTE_TYPES)
 
     const sendRoute = routes.find(route => route.type === 'GROUP_MESSAGE_SEND')

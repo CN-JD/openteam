@@ -1,10 +1,11 @@
 import { buildUnsyncedContext } from '../group/contextSync'
+import { extractSupportedConversationId, normalizeSupportedChatConversationUrl } from '../group/conversationUrl'
 import { parseGroupMentions } from '../group/mentionParser'
 import { buildPrompt } from '../group/promptBuilder'
-import type { GroupChat, GroupMessage, GroupRole, MessageReference, OpenTeamStore, RuntimeFrameBinding } from '../group/types'
+import type { GroupChat, GroupMessage, GroupRole, MessageReference, OpenTeamStore, RoleStatus, RuntimeFrameBinding } from '../group/types'
 import type { BackgroundMessageRoute } from './messageRouter'
 import type { PromptDelivery, PromptSender } from './promptDelivery'
-import type { RuntimeMessage } from './runtimeClient'
+import { messageTabId, rememberHost, senderFrameId, senderTabId, type RuntimeMessage } from './runtimeClient'
 import type { RuntimeFrameRegistry } from './runtimeFrames'
 import { getChatMessages, getChatRoles, mutateStore, requireChat, requireRole } from './storeAccess'
 
@@ -13,10 +14,17 @@ const STALE_THINKING_MS = 120_000
 export const MESSAGE_ROUTE_TYPES = [
   'GROUP_ROLE_RETRY_REPLY',
   'GROUP_MESSAGE_SEND',
+  'TEAM_FRAME_ROLE_READY',
+  'TEAM_ROLE_CONVERSATION_UPDATED',
+  'TEAM_SEND_ACK',
+  'TEAM_ROLE_STATUS',
+  'TEAM_ROLE_REPLY',
+  'TEAM_ROLE_ERROR',
 ] as const
 
 export interface MessageHandlersDependencies {
   broadcastStoreUpdated(store: OpenTeamStore, excludeTabId?: number): Promise<void> | void
+  getChatStatusFromRoles(store: OpenTeamStore, chat: GroupChat): GroupChat['status']
   log: {
     debug(event: string, details?: Record<string, unknown>): void
     info(event: string, details?: Record<string, unknown>): void
@@ -24,7 +32,7 @@ export interface MessageHandlersDependencies {
   }
   newId(prefix: string): string
   now(): number
-  runtimeFrames: Pick<RuntimeFrameRegistry, 'getByRole'>
+  runtimeFrames: Pick<RuntimeFrameRegistry, 'bind' | 'getByAddress' | 'getByRole'>
   sendError(reason: string): Promise<void> | void
   sendPrompt: PromptSender
 }
@@ -203,10 +211,296 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
     return { ok: true, store, messageId: result.delivery.message.messageId }
   }
 
+  const handleFrameRoleReady = async (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => {
+    const tabId = messageTabId(message, sender)
+    if (tabId === undefined) throw new Error('缺少 sender tab')
+    rememberHost(sender, tabId)
+
+    const chatId = requireString(message.chatId, '缺少群聊 ID')
+    const roleId = requireString(message.roleId, '缺少人员 ID')
+    const frameId = senderFrameId(sender)
+    const timestamp = deps.now()
+    deps.log.info('frame-ready:received', {
+      chatId,
+      roleId,
+      tabId,
+      frameId,
+      senderTabId: senderTabId(sender),
+      hostTabId: message.hostTabId,
+      senderUrl: sender.url,
+      conversationId: message.conversationId,
+      conversationUrl: message.conversationUrl,
+    })
+    deps.runtimeFrames.bind({ chatId, roleId, tabId, frameId, ready: true, lastSeenAt: timestamp })
+
+    const { store, result } = await mutateStore(store => {
+      const chat = requireChat(store, chatId)
+      const role = requireRole(store, chat.id, roleId)
+      role.status = 'ready'
+      role.updatedAt = timestamp
+      updateConversation(role, readOptionalString(message.conversationUrl), readOptionalString(message.conversationId))
+      chat.status = deps.getChatStatusFromRoles(store, chat)
+      chat.updatedAt = timestamp
+      return { role, replyHistory: getRoleReplyHistory(store, chat, role.id) }
+    })
+
+    deps.log.info('frame-ready:store-updated', { chatId, roleId, roleName: result.role.name, status: result.role.status, replyHistoryCount: result.replyHistory.length, binding: deps.runtimeFrames.getByRole(chatId, roleId) })
+    await deps.broadcastStoreUpdated(store)
+    return { ok: true, role: result.role, replyHistory: result.replyHistory, store }
+  }
+
+  const handleConversationUpdated = async (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => {
+    const identity = readIdentity(deps, message, sender)
+    const { store, result } = await mutateStore(store => {
+      const chat = requireChat(store, identity.chatId)
+      const role = requireRole(store, chat.id, identity.roleId)
+      updateConversation(role, readOptionalString(message.conversationUrl), readOptionalString(message.conversationId))
+      role.updatedAt = deps.now()
+      chat.updatedAt = role.updatedAt
+      return role
+    })
+    await deps.broadcastStoreUpdated(store)
+    return { ok: true, role: result, store }
+  }
+
+  const handleSendAck = async (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => {
+    const identity = readIdentity(deps, message, sender)
+    const messageId = requireString(message.messageId, '缺少消息 ID')
+    deps.log.info('send-ack:received', { ...identity, messageId, senderUrl: sender.url, tabId: messageTabId(message, sender), frameId: senderFrameId(sender) })
+    const { store } = await mutateStore(store => {
+      const chat = requireChat(store, identity.chatId)
+      const role = requireRole(store, chat.id, identity.roleId)
+      const userMessage = store.messagesById[messageId]
+      if (userMessage?.deliveryStatus?.[role.id] === 'pending') {
+        userMessage.deliveryStatus[role.id] = 'sent'
+        if (Object.values(userMessage.deliveryStatus).every(status => status === 'sent' || status === 'received')) {
+          userMessage.status = 'sent'
+        }
+      }
+      if (userMessage) role.contextCursor = Math.max(role.contextCursor, userMessage.seq)
+      role.updatedAt = deps.now()
+      chat.updatedAt = role.updatedAt
+    })
+    await deps.broadcastStoreUpdated(store)
+    return { ok: true, store }
+  }
+
+  const handleRoleStatus = async (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => {
+    const mappedStatus = mapRuntimeRoleStatus(message.status)
+    if (!mappedStatus) return { ok: false, error: '未知人员状态' }
+
+    const identity = readIdentity(deps, message, sender)
+    const timestamp = deps.now()
+    deps.log.info('role-status:received', {
+      ...identity,
+      runtimeStatus: message.status,
+      mappedStatus,
+      error: message.error,
+      senderUrl: sender.url,
+      tabId: messageTabId(message, sender),
+      frameId: senderFrameId(sender),
+    })
+
+    const { store, result } = await mutateStore(store => {
+      const chat = requireChat(store, identity.chatId)
+      const role = requireRole(store, chat.id, identity.roleId)
+      role.status = mappedStatus
+      role.updatedAt = timestamp
+      if (mappedStatus === 'ready' || mappedStatus === 'error') delete role.lastPromptMessageId
+      if (mappedStatus === 'ready' || mappedStatus === 'error') delete role.replyAttemptId
+      chat.status = deps.getChatStatusFromRoles(store, chat)
+      chat.updatedAt = timestamp
+      return role
+    })
+
+    await deps.broadcastStoreUpdated(store)
+    return { ok: true, role: result, store }
+  }
+
+  const handleRoleReply = async (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => {
+    const identity = readIdentity(deps, message, sender)
+    const content = requireString(message.content, '回复内容不能为空')
+    const contentFormat = message.contentFormat === 'markdown' ? 'markdown' : undefined
+    const promptMessageId = readOptionalString(message.messageId)
+    const replyAttemptId = readOptionalString(message.replyAttemptId)
+    const timestamp = deps.now()
+    deps.log.info('role-reply:received', { ...identity, promptMessageId, replyAttemptId, contentLength: content.length, senderUrl: sender.url })
+
+    const { store, result } = await mutateStore(store => {
+      const chat = requireChat(store, identity.chatId)
+      const role = requireRole(store, chat.id, identity.roleId)
+      const staleReason = staleReplyReason(store, chat, role, promptMessageId, replyAttemptId)
+      if (staleReason) {
+        return { ignored: true as const, reason: staleReason, roleId: role.id, promptMessageId }
+      }
+
+      updateConversation(role, readOptionalString(message.conversationUrl), readOptionalString(message.conversationId))
+
+      const reply: GroupMessage = {
+        id: deps.newId('msg'),
+        chatId: chat.id,
+        seq: chat.nextMessageSeq,
+        type: 'assistant',
+        content,
+        contentFormat,
+        roleId: role.id,
+        roleName: role.name,
+        createdAt: timestamp,
+        status: 'received',
+      }
+      store.messagesById[reply.id] = reply
+      chat.messageIds.push(reply.id)
+      chat.nextMessageSeq += 1
+      markChatHasNewMessage(store, chat)
+
+      if (promptMessageId) {
+        const userMessage = store.messagesById[promptMessageId]
+        if (userMessage?.deliveryStatus?.[role.id]) {
+          userMessage.deliveryStatus[role.id] = 'received'
+          if (Object.values(userMessage.deliveryStatus).every(status => status === 'received')) userMessage.status = 'received'
+        }
+      }
+
+      role.status = 'ready'
+      role.lastReplyAt = timestamp
+      role.updatedAt = timestamp
+      if (!promptMessageId || role.lastPromptMessageId === promptMessageId) delete role.lastPromptMessageId
+      if (!replyAttemptId || role.replyAttemptId === replyAttemptId) delete role.replyAttemptId
+      chat.status = deps.getChatStatusFromRoles(store, chat)
+      chat.updatedAt = timestamp
+      return { ignored: false as const, reply }
+    })
+
+    if (result.ignored) {
+      deps.log.warn('role-reply:ignored-stale', { ...identity, promptMessageId: result.promptMessageId, reason: result.reason })
+      return { ok: true, ignored: true, reason: result.reason, store }
+    }
+
+    deps.log.info('role-reply:stored', { chatId: result.reply.chatId, roleId: result.reply.roleId, replyMessageId: result.reply.id })
+    await deps.broadcastStoreUpdated(store)
+    return { ok: true, message: result.reply, store }
+  }
+
+  const handleRoleError = async (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => {
+    const identity = readIdentity(deps, message, sender)
+    const reason = readOptionalString(message.reason) ?? readOptionalString(message.error) ?? '人员执行失败'
+    const promptMessageId = readOptionalString(message.messageId)
+    const replyAttemptId = readOptionalString(message.replyAttemptId)
+    deps.log.warn('role-error:received', { ...identity, promptMessageId, replyAttemptId, reason, senderUrl: sender.url, tabId: messageTabId(message, sender), frameId: senderFrameId(sender) })
+
+    const { store } = await mutateStore(store => {
+      const chat = requireChat(store, identity.chatId)
+      const role = requireRole(store, chat.id, identity.roleId)
+      role.status = 'error'
+      role.updatedAt = deps.now()
+      if (!promptMessageId || role.lastPromptMessageId === promptMessageId) delete role.lastPromptMessageId
+      if (!replyAttemptId || role.replyAttemptId === replyAttemptId) delete role.replyAttemptId
+
+      if (promptMessageId) {
+        const userMessage = store.messagesById[promptMessageId]
+        if (userMessage?.deliveryStatus?.[role.id]) {
+          userMessage.deliveryStatus[role.id] = 'error'
+          userMessage.status = 'error'
+        }
+      }
+      chat.status = 'error'
+      chat.updatedAt = role.updatedAt
+    })
+
+    await deps.broadcastStoreUpdated(store)
+    await deps.sendError(reason)
+    return { ok: true, store }
+  }
+
   return [
     { type: 'GROUP_ROLE_RETRY_REPLY', handler: handleRoleRetryReply },
     { type: 'GROUP_MESSAGE_SEND', handler: handleMessageSend },
+    {
+      type: 'TEAM_FRAME_ROLE_READY',
+      handler: (message, sender) => readOptionalString(message.chatId) ? handleFrameRoleReady(message, sender) : { ok: false, error: 'TEAM_FRAME_ROLE_READY 缺少 chatId' },
+    },
+    { type: 'TEAM_ROLE_CONVERSATION_UPDATED', handler: handleConversationUpdated },
+    { type: 'TEAM_SEND_ACK', handler: handleSendAck },
+    { type: 'TEAM_ROLE_STATUS', handler: handleRoleStatus },
+    { type: 'TEAM_ROLE_REPLY', handler: handleRoleReply },
+    { type: 'TEAM_ROLE_ERROR', handler: handleRoleError },
   ]
+}
+
+function getRoleReplyHistory(store: OpenTeamStore, chat: GroupChat, roleId: string, limit = 100): string[] {
+  return getChatMessages(store, chat)
+    .filter(message => message.type === 'assistant' && message.roleId === roleId && message.content.trim())
+    .slice(-limit)
+    .map(message => message.content)
+}
+
+function staleReplyReason(store: OpenTeamStore, chat: GroupChat, role: GroupRole, promptMessageId: string | undefined, replyAttemptId?: string): string | undefined {
+  if (!promptMessageId) return 'missing-prompt-message-id'
+  if (role.lastPromptMessageId !== promptMessageId) return 'prompt-message-mismatch'
+  if (replyAttemptId && role.replyAttemptId && role.replyAttemptId !== replyAttemptId) return 'reply-attempt-mismatch'
+
+  const userMessage = store.messagesById[promptMessageId]
+  if (!userMessage || userMessage.chatId !== chat.id || userMessage.type !== 'user') return 'prompt-message-not-found'
+
+  const deliveryStatus = userMessage.deliveryStatus?.[role.id]
+  if (deliveryStatus !== 'pending' && deliveryStatus !== 'sent') return `delivery-already-${deliveryStatus ?? 'missing'}`
+
+  return undefined
+}
+
+function markChatHasNewMessage(store: OpenTeamStore, chat: GroupChat): void {
+  if (store.currentChatId === chat.id) return
+  store.viewState ??= { chatReadSeqById: {}, chatHasNewMessageById: {} }
+  store.viewState.chatHasNewMessageById ??= {}
+  store.viewState.chatHasNewMessageById[chat.id] = true
+}
+
+function readIdentity(deps: MessageHandlersDependencies, message: RuntimeMessage, sender: chrome.runtime.MessageSender): { chatId: string; roleId: string } {
+  const chatId = readOptionalString(message.chatId)
+  const roleId = readOptionalString(message.roleId)
+  if (chatId && roleId) return { chatId, roleId }
+
+  const tabId = messageTabId(message, sender)
+  if (tabId !== undefined) {
+    const binding = deps.runtimeFrames.getByAddress(tabId, senderFrameId(sender))
+    if (binding) return { chatId: binding.chatId, roleId: binding.roleId }
+  }
+
+  throw new Error('缺少 chatId/roleId')
+}
+
+function updateConversation(role: GroupRole, conversationUrl: string | undefined, conversationId: string | undefined): void {
+  const safeUrl = normalizeSupportedChatConversationUrl(conversationUrl)
+  const conversationIdFromUrl = extractSupportedConversationId(safeUrl)
+  if (safeUrl && conversationIdFromUrl) {
+    role.geminiConversationUrl = safeUrl
+    role.geminiConversationId = conversationIdFromUrl
+    return
+  }
+
+  if (isMeaningfulConversationId(conversationId)) role.geminiConversationId = conversationId
+}
+
+function isMeaningfulConversationId(value: string | undefined): value is string {
+  return Boolean(value && value !== '__default__')
+}
+
+function mapRuntimeRoleStatus(value: unknown): RoleStatus | undefined {
+  switch (value) {
+    case 'opening':
+    case 'offline':
+      return 'loading'
+    case 'sending':
+    case 'generating':
+      return 'thinking'
+    case 'online':
+    case 'idle':
+      return 'ready'
+    case 'error':
+      return 'error'
+    default:
+      return undefined
+  }
 }
 
 async function markDeliveryError(deps: MessageHandlersDependencies, chatId: string, roleId: string, messageId: string, reason: string): Promise<void> {
