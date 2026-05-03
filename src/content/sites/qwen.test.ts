@@ -41,6 +41,30 @@ describe('Qwen site adapter', () => {
     expect(inputListener).toHaveBeenCalledTimes(1)
   })
 
+  it('accepts multiline prompt text without counting Slate placeholders or zero-width nodes', async () => {
+    document.body.innerHTML = `
+      <div data-chat-input-shell="true">
+        <div role="textbox" data-slate-editor="true" contenteditable="true" data-placeholder="向千问提问">
+          <p data-slate-node="element">
+            <span data-slate-node="text">
+              <span data-slate-leaf="true">
+                <span data-slate-zero-width="n" data-slate-length="0">\uFEFF<br></span>
+                <span data-slate-placeholder="true" contenteditable="false">向千问提问</span>
+              </span>
+            </span>
+          </p>
+        </div>
+      </div>
+    `
+    const content = '你是「产品经理」。\n\n你的职责：\n你是一名产品经理\n\n用户消息：\n1111111\n\n请以「产品经理」身份回复。'
+
+    const adapter = createQwenAdapter()
+    await adapter.fillAndSend(content, false)
+
+    const diagnostics = adapter.collectPromptDiagnostics()
+    expect(diagnostics.editorTextPreview).toBe(content.slice(0, 120))
+  })
+
   it('uses Qwen beforeinput insertion without duplicating prompt text', async () => {
     document.body.innerHTML = `
       <div data-chat-input-shell="true">
@@ -80,6 +104,65 @@ describe('Qwen site adapter', () => {
     expect(editor.textContent).toBe('来自 beforeinput')
     expect(execCommand).toHaveBeenCalledWith('delete', false)
     expect(execCommand).not.toHaveBeenCalledWith('insertText', false, '来自 beforeinput')
+  })
+
+  it('uses the Qwen page-world writer when isolated-world editing cannot update Slate state', async () => {
+    document.body.innerHTML = `
+      <div data-chat-input-shell="true">
+        <div role="textbox" data-slate-editor="true" contenteditable="true" data-placeholder="向千问提问">
+          <p data-slate-node="element"><span data-slate-node="text"><span data-slate-leaf="true"><span data-slate-zero-width="n">\uFEFF<br></span></span></span></p>
+        </div>
+      </div>
+    `
+    const editor = document.querySelector<HTMLElement>('[data-slate-editor="true"]')!
+    const originalExecCommand = document.execCommand
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn(() => true),
+    })
+    const onWriteRequest = (event: Event) => {
+      const rawDetail = (event as CustomEvent<string | { requestId: string; content: string }>).detail
+      const detail = typeof rawDetail === 'string' ? JSON.parse(rawDetail) as { requestId: string; content: string } : rawDetail
+      editor.replaceChildren()
+      for (const line of detail.content.split('\n')) {
+        const block = document.createElement('p')
+        block.setAttribute('data-slate-node', 'element')
+        const text = document.createElement('span')
+        text.setAttribute('data-slate-string', 'true')
+        text.textContent = line || '\uFEFF'
+        block.append(text)
+        editor.append(block)
+      }
+      document.documentElement.dispatchEvent(
+        new CustomEvent('openteam:qwen-write-response', {
+          detail: JSON.stringify({
+            requestId: detail.requestId,
+            ok: true,
+            text: detail.content,
+            textLength: detail.content.length,
+            html: editor.innerHTML,
+          }),
+        }),
+      )
+    }
+    document.documentElement.addEventListener('openteam:qwen-write-request', onWriteRequest)
+
+    const adapter = createQwenAdapter()
+    try {
+      await adapter.fillAndSend('页面主世界写入', false)
+    } finally {
+      document.documentElement.removeEventListener('openteam:qwen-write-request', onWriteRequest)
+      Object.defineProperty(document, 'execCommand', {
+        configurable: true,
+        value: originalExecCommand,
+      })
+    }
+
+    const diagnostics = adapter.collectPromptDiagnostics?.() ?? {}
+    const events = diagnostics.qwenDebugEvents as Array<{ stage: string; details: { strategy?: string; attempts?: Array<{ strategy?: string; accepted?: boolean }> } }>
+    const writeResult = [...events].reverse().find(event => event.stage === 'fill:write-result')?.details
+    expect(writeResult?.strategy).toBe('page-world-writer')
+    expect(writeResult?.attempts?.find(attempt => attempt.strategy === 'page-world-writer')?.accepted).toBe(true)
   })
 
   it('clicks the enabled Qwen send button near the composer', async () => {

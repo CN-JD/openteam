@@ -45,6 +45,19 @@ export default defineConfig(({ mode }) => ({
           legalComments: 'none',
         })
 
+        await buildWithEsbuild({
+          entryPoints: [resolve(__dirname, 'src/content/qwenPageWorldBridge.ts')],
+          outfile: resolve(__dirname, 'dist/qwenPageWorldBridge.js'),
+          bundle: true,
+          format: 'iife',
+          platform: 'browser',
+          target: 'chrome114',
+          define: {
+            __OPENTEAM_DEV__: JSON.stringify(mode === 'development'),
+          },
+          legalComments: 'none',
+        })
+
         const contentScript = readFileSync('dist/content.js', 'utf8')
         if (hasTopLevelStaticImport(contentScript)) {
           throw new Error('dist/content.js must be self-contained because Chrome content_scripts are not ES modules')

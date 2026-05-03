@@ -55,6 +55,7 @@ describe('team.html chat creation UI', () => {
     expect(html).toContain('id="template-site-deepseek"')
     expect(html).toContain('id="template-site-qwen"')
     expect(html).toContain('id="template-site-kimi"')
+    expect(html).toContain('for="template-site-qwen" hidden')
     expect(html).toContain('for="template-site-kimi" hidden')
     expect(html).toContain('id="add-person-modal"')
     expect(html).toContain('id="open-temporary-person"')
@@ -81,9 +82,9 @@ describe('team.html chat creation UI', () => {
     expect(source).toContain("source: 'temporary'")
     expect(source).toContain("if (deps.templateSiteClaudeEl.checked) return 'claude'")
     expect(source).toContain("if (deps.templateSiteDeepSeekEl.checked) return 'deepseek'")
-    expect(source).toContain("if (deps.templateSiteQwenEl.checked) return 'qwen'")
-    expect(source).toContain("const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek', 'qwen'] as const")
+    expect(source).toContain("const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek'] as const")
     expect(source).not.toContain("if (deps.templateSiteKimiEl.checked) return 'kimi'")
+    expect(source).not.toContain("if (deps.templateSiteQwenEl.checked) return 'qwen'")
   })
 
   it('stores a default target site on people-library entries instead of the settings menu', () => {

@@ -179,3 +179,5 @@ function logKimiPageBridge(stage: string, details: Record<string, unknown>): voi
     // Logging is diagnostic only and must never affect page input.
   }
 }
+
+export {}

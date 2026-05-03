@@ -23,7 +23,7 @@ describe('extension security configuration', () => {
     expect(manifest.host_permissions).not.toContain('<all_urls>')
   })
 
-  it('loads the Kimi page-world bridge only on Kimi pages', () => {
+  it('loads page-world bridges only on the matching pages', () => {
     const manifest = JSON.parse(readFileSync(resolve(process.cwd(), 'public/manifest.json'), 'utf8')) as {
       content_scripts?: Array<{
         matches?: string[]
@@ -36,6 +36,13 @@ describe('extension security configuration', () => {
     expect(bridgeScript).toEqual(expect.objectContaining({
       matches: ['*://www.kimi.com/*'],
       js: ['kimiPageWorldBridge.js'],
+      world: 'MAIN',
+    }))
+
+    const qwenBridgeScript = manifest.content_scripts?.find(script => script.js?.includes('qwenPageWorldBridge.js'))
+    expect(qwenBridgeScript).toEqual(expect.objectContaining({
+      matches: ['*://www.qianwen.com/*'],
+      js: ['qwenPageWorldBridge.js'],
       world: 'MAIN',
     }))
   })

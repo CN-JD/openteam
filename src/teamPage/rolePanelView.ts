@@ -1,7 +1,7 @@
 import type { ChatSite, GroupRole, OpenTeamStore, RoleStatus } from '../group/types'
 import type { TeamPageState } from './appState'
 
-const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek', 'qwen'] as const
+const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek'] as const
 
 interface RolePanelIframeHost {
   recoverRole(role: GroupRole): void

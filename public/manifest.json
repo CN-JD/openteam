@@ -34,6 +34,13 @@
       "world": "MAIN"
     },
     {
+      "matches": ["*://www.qianwen.com/*"],
+      "js": ["qwenPageWorldBridge.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
       "matches": ["*://gemini.google.com/*", "*://*.gemini.google.com/*", "*://chatgpt.com/*", "*://*.chatgpt.com/*", "*://chat.openai.com/*", "*://claude.ai/*", "*://chat.deepseek.com/*", "*://www.kimi.com/*", "*://www.qianwen.com/*"],
       "js": ["content.js"],
       "run_at": "document_start",

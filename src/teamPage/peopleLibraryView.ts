@@ -7,7 +7,7 @@ type AddPersonItem =
   | { key: string; source: 'temporary'; draftId: string; name: string; description?: string; systemPrompt: string; chatSite: ChatSite }
 
 const PEOPLE_LIBRARY_PAGE_SIZE = 8
-const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek', 'qwen'] as const
+const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek'] as const
 
 export interface PeopleLibraryViewDependencies {
   state: TeamPageState
@@ -461,7 +461,6 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
     if (deps.templateSiteChatGptEl.checked) return 'chatgpt'
     if (deps.templateSiteClaudeEl.checked) return 'claude'
     if (deps.templateSiteDeepSeekEl.checked) return 'deepseek'
-    if (deps.templateSiteQwenEl.checked) return 'qwen'
     return 'gemini'
   }
 
