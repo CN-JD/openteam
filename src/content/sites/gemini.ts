@@ -5,12 +5,17 @@ const GEMINI_ORIGIN = 'https://gemini.google.com'
 const GEMINI_HOME_URL = `${GEMINI_ORIGIN}/`
 const GEMINI_APP_PREFIX = '/app/'
 const DEFAULT_INPUT_TIMEOUT_MS = 9000
+const DEFAULT_CLIPBOARD_TIMEOUT_MS = 900
+const DEFAULT_CLIPBOARD_POLL_MS = 40
 
 const GEMINI_SELECTORS = {
   editor: 'div.ql-editor[contenteditable="true"], rich-textarea div[contenteditable="true"]',
   sendButton:
     'button.send-button[aria-label*="发送"], button.send-button[aria-label*="Send"], button[aria-label*="Send message"], button[aria-label*="发送消息"]',
   response: 'model-response, .model-response-text, message-content',
+  copyButton:
+    'button[data-test-id="copy-button"], copy-button button, button[mattooltip="复制回答"], button[aria-label="复制"], button[aria-label*="Copy"], button[aria-label*="复制"]',
+  turn: 'model-response',
 }
 
 const BLOCK_TAGS = new Set([
@@ -41,10 +46,14 @@ const SKIP_TAGS = new Set([
 interface GeminiAdapterOptions {
   href?: string
   inputTimeoutMs?: number
+  clipboardTimeoutMs?: number
+  clipboardPollMs?: number
 }
 
 export function createGeminiAdapter(options: GeminiAdapterOptions = {}): ChatSiteAdapter {
   const inputTimeoutMs = options.inputTimeoutMs ?? DEFAULT_INPUT_TIMEOUT_MS
+  const clipboardTimeoutMs = options.clipboardTimeoutMs ?? DEFAULT_CLIPBOARD_TIMEOUT_MS
+  const clipboardPollMs = options.clipboardPollMs ?? DEFAULT_CLIPBOARD_POLL_MS
 
   function currentHref(): string {
     return options.href ?? location.href
@@ -87,6 +96,7 @@ export function createGeminiAdapter(options: GeminiAdapterOptions = {}): ChatSit
     getResponseContainers,
     getAllAssistantReplies,
     readResponseText: extractCleanText,
+    readResponseTextFromCopy: node => readResponseTextFromCopy(node, clipboardTimeoutMs, clipboardPollMs),
     findResponseContainer,
     isGenerating: isGeminiGenerating,
     fillAndSend,
@@ -254,6 +264,67 @@ function findResponseContainer(element: Element | null): Element | null {
   }
 
   return null
+}
+
+async function readResponseTextFromCopy(node: Node, timeoutMs: number, pollMs: number): Promise<string | undefined> {
+  if (node.nodeType !== Node.ELEMENT_NODE) return undefined
+
+  const copyButton = findCopyButton(node as Element)
+  const clipboard = navigator.clipboard
+  if (!copyButton || !clipboard?.readText) return undefined
+
+  let previousText: string | undefined
+  try {
+    previousText = await clipboard.readText()
+  } catch {
+    previousText = undefined
+  }
+
+  try {
+    copyButton.click()
+    const copiedText = await waitForClipboardText(previousText, timeoutMs, pollMs)
+    return copiedText?.trim() || undefined
+  } catch {
+    return undefined
+  } finally {
+    if (previousText !== undefined && clipboard.writeText) {
+      clipboard.writeText(previousText).catch(() => undefined)
+    }
+  }
+}
+
+function findCopyButton(response: Element): HTMLButtonElement | undefined {
+  const turn = response.closest(GEMINI_SELECTORS.turn) ?? response.parentElement
+  const copyButton = turn?.querySelector<HTMLButtonElement>(GEMINI_SELECTORS.copyButton)
+  return copyButton && isClickableButton(copyButton) ? copyButton : undefined
+}
+
+function waitForClipboardText(previousText: string | undefined, timeoutMs: number, pollMs: number): Promise<string | undefined> {
+  const clipboard = navigator.clipboard
+  if (!clipboard?.readText) return Promise.resolve(undefined)
+
+  return new Promise(resolve => {
+    const startedAt = Date.now()
+    const timer = window.setInterval(() => {
+      clipboard.readText()
+        .then(text => {
+          const trimmed = text.trim()
+          if (trimmed && (previousText === undefined || text !== previousText)) {
+            window.clearInterval(timer)
+            resolve(text)
+            return
+          }
+          if (Date.now() - startedAt >= timeoutMs) {
+            window.clearInterval(timer)
+            resolve(undefined)
+          }
+        })
+        .catch(() => {
+          window.clearInterval(timer)
+          resolve(undefined)
+        })
+    }, pollMs)
+  })
 }
 
 function isGeminiGenerating(): boolean {

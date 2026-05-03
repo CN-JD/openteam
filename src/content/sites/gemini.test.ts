@@ -61,4 +61,39 @@ describe('Gemini site adapter', () => {
 
     expect(createGeminiAdapter().getAllAssistantReplies()).toEqual(['第一段\n第二段'])
   })
+
+  it('uses the Gemini copy action to read markdown replies and restores the clipboard', async () => {
+    let clipboardText = '用户原来的剪贴板'
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        readText: vi.fn(async () => clipboardText),
+        writeText: vi.fn(async (text: string) => {
+          clipboardText = text
+        }),
+      },
+    })
+    document.body.innerHTML = `
+      <model-response>
+        <message-content>
+          <p>标题</p>
+          <pre><code>const answer = 42</code></pre>
+        </message-content>
+        <message-actions>
+          <copy-button>
+            <button aria-label="复制" data-test-id="copy-button">复制</button>
+          </copy-button>
+        </message-actions>
+      </model-response>
+    `
+    document.querySelector<HTMLButtonElement>('[data-test-id="copy-button"]')?.addEventListener('click', () => {
+      clipboardText = '标题\n\n```ts\nconst answer = 42\n```'
+    })
+    const response = document.querySelector('message-content')!
+
+    const copied = await createGeminiAdapter({ clipboardPollMs: 5, clipboardTimeoutMs: 50 }).readResponseTextFromCopy?.(response)
+
+    expect(copied).toBe('标题\n\n```ts\nconst answer = 42\n```')
+    expect(clipboardText).toBe('用户原来的剪贴板')
+  })
 })
