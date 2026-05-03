@@ -1,5 +1,5 @@
 export type RoomMode = 'independent' | 'collaborative'
-export type ChatSite = 'gemini' | 'chatgpt' | 'claude' | 'deepseek' | 'kimi'
+export type ChatSite = 'gemini' | 'chatgpt' | 'claude' | 'deepseek' | 'kimi' | 'qwen'
 
 export type ChatStatus = 'draft' | 'initializing' | 'ready' | 'running' | 'error'
 

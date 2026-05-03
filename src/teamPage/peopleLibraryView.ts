@@ -7,7 +7,7 @@ type AddPersonItem =
   | { key: string; source: 'temporary'; draftId: string; name: string; description?: string; systemPrompt: string; chatSite: ChatSite }
 
 const PEOPLE_LIBRARY_PAGE_SIZE = 8
-const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek'] as const
+const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek', 'qwen'] as const
 
 export interface PeopleLibraryViewDependencies {
   state: TeamPageState
@@ -34,6 +34,7 @@ export interface PeopleLibraryViewDependencies {
   templateSiteChatGptEl: HTMLInputElement
   templateSiteClaudeEl: HTMLInputElement
   templateSiteDeepSeekEl: HTMLInputElement
+  templateSiteQwenEl: HTMLInputElement
   templateSiteKimiEl: HTMLInputElement
   temporaryPersonNameEl: HTMLInputElement
   temporaryPersonDescriptionEl: HTMLTextAreaElement
@@ -102,6 +103,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
       deps.templateSiteChatGptEl.checked = defaultChatSite === 'chatgpt'
       deps.templateSiteClaudeEl.checked = defaultChatSite === 'claude'
       deps.templateSiteDeepSeekEl.checked = defaultChatSite === 'deepseek'
+      deps.templateSiteQwenEl.checked = defaultChatSite === 'qwen'
       deps.templateSiteKimiEl.checked = false
     } else {
       deps.templateNameEl.value = ''
@@ -112,6 +114,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
       deps.templateSiteChatGptEl.checked = defaultChatSite === 'chatgpt'
       deps.templateSiteClaudeEl.checked = defaultChatSite === 'claude'
       deps.templateSiteDeepSeekEl.checked = defaultChatSite === 'deepseek'
+      deps.templateSiteQwenEl.checked = defaultChatSite === 'qwen'
       deps.templateSiteKimiEl.checked = false
     }
   }
@@ -458,6 +461,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
     if (deps.templateSiteChatGptEl.checked) return 'chatgpt'
     if (deps.templateSiteClaudeEl.checked) return 'claude'
     if (deps.templateSiteDeepSeekEl.checked) return 'deepseek'
+    if (deps.templateSiteQwenEl.checked) return 'qwen'
     return 'gemini'
   }
 
@@ -487,6 +491,7 @@ function siteLabel(site: ChatSite | undefined): string {
   if (site === 'claude') return 'Claude'
   if (site === 'deepseek') return 'DeepSeek'
   if (site === 'kimi') return 'Kimi'
+  if (site === 'qwen') return '千问'
   return 'Gemini'
 }
 

@@ -1547,6 +1547,12 @@ select:focus {
   color: #86efac;
 }
 
+.site-pill-qwen {
+  border-color: rgba(96, 165, 250, 0.34);
+  background: rgba(96, 165, 250, 0.1);
+  color: #93c5fd;
+}
+
 .role-site-badge {
   display: inline-flex;
   align-items: center;

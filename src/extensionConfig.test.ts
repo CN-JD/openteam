@@ -18,6 +18,7 @@ describe('extension security configuration', () => {
       'https://claude.ai/*',
       'https://chat.deepseek.com/*',
       'https://www.kimi.com/*',
+      'https://www.qianwen.com/*',
     ])
     expect(manifest.host_permissions).not.toContain('<all_urls>')
   })
@@ -47,7 +48,7 @@ describe('extension security configuration', () => {
       }
     }>
 
-    expect(rules).toHaveLength(6)
+    expect(rules).toHaveLength(7)
     expect(rules.map(rule => rule.condition?.urlFilter)).toEqual([
       '||gemini.google.com/',
       '||chatgpt.com/',
@@ -55,6 +56,7 @@ describe('extension security configuration', () => {
       '||claude.ai/',
       '||chat.deepseek.com/',
       '||www.kimi.com/',
+      '||www.qianwen.com/',
     ])
 
     for (const rule of rules) {

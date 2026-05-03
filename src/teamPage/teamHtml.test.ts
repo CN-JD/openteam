@@ -46,12 +46,14 @@ describe('team.html chat creation UI', () => {
     expect(html).not.toContain('id="default-site-claude"')
     expect(html).not.toContain('id="default-site-deepseek"')
     expect(html).not.toContain('id="default-site-kimi"')
+    expect(html).not.toContain('id="default-site-qwen"')
     expect(html).toContain('id="people-library-modal"')
     expect(html).toContain('id="people-library-list"')
     expect(html).toContain('id="template-site-gemini"')
     expect(html).toContain('id="template-site-chatgpt"')
     expect(html).toContain('id="template-site-claude"')
     expect(html).toContain('id="template-site-deepseek"')
+    expect(html).toContain('id="template-site-qwen"')
     expect(html).toContain('id="template-site-kimi"')
     expect(html).toContain('for="template-site-kimi" hidden')
     expect(html).toContain('id="add-person-modal"')
@@ -79,7 +81,8 @@ describe('team.html chat creation UI', () => {
     expect(source).toContain("source: 'temporary'")
     expect(source).toContain("if (deps.templateSiteClaudeEl.checked) return 'claude'")
     expect(source).toContain("if (deps.templateSiteDeepSeekEl.checked) return 'deepseek'")
-    expect(source).toContain("const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek'] as const")
+    expect(source).toContain("if (deps.templateSiteQwenEl.checked) return 'qwen'")
+    expect(source).toContain("const VISIBLE_CHAT_SITES = ['gemini', 'chatgpt', 'claude', 'deepseek', 'qwen'] as const")
     expect(source).not.toContain("if (deps.templateSiteKimiEl.checked) return 'kimi'")
   })
 
@@ -93,6 +96,7 @@ describe('team.html chat creation UI', () => {
     expect(source).not.toContain("'#default-site-claude'")
     expect(source).not.toContain("'#default-site-deepseek'")
     expect(source).not.toContain("'#default-site-kimi'")
+    expect(source).not.toContain("'#default-site-qwen'")
     expect(domRefsSource).toContain('templateSiteGeminiEl')
     expect(source).toContain('function readTemplateChatSite(): ChatSite')
     expect(source).toContain('defaultChatSite: readTemplateChatSite()')
@@ -102,6 +106,7 @@ describe('team.html chat creation UI', () => {
     expect(html).not.toContain('默认站点：Claude')
     expect(html).not.toContain('默认站点：DeepSeek')
     expect(html).not.toContain('默认站点：Kimi')
+    expect(html).not.toContain('默认站点：千问')
   })
 
   it('keeps the people-library modal as a list and opens a separate editor for creating or editing people', () => {
@@ -155,6 +160,7 @@ describe('team.html chat creation UI', () => {
     expect(html).not.toContain('为这次加入群聊的人员统一指定 Gemini。')
     expect(html).not.toContain('为这次加入群聊的人员统一指定 ChatGPT。')
     expect(html).not.toContain('为这次加入群聊的人员统一指定 Claude。')
+    expect(html).not.toContain('为这次加入群聊的人员统一指定千问。')
   })
 
   it('uses a clean page background without decorative side panels', () => {
