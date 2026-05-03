@@ -112,6 +112,48 @@ describe('ChatGPT site adapter', () => {
     expect(clipboardText).toBe('用户原来的剪贴板')
   })
 
+  it('uses the turn copy action instead of code block copy buttons', async () => {
+    let clipboardText = '用户原来的剪贴板'
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        readText: vi.fn(async () => clipboardText),
+        writeText: vi.fn(async (text: string) => {
+          clipboardText = text
+        }),
+      },
+    })
+    document.body.innerHTML = `
+      <section data-turn="assistant" data-testid="conversation-turn-4">
+        <div data-message-author-role="assistant" data-message-id="reply-1" data-turn-start-message="true">
+          <div class="markdown">
+            <p>完整回复开头</p>
+            <pre>
+              <button aria-label="复制">复制代码</button>
+              <code>const partial = true</code>
+            </pre>
+            <p>完整回复结尾</p>
+          </div>
+        </div>
+        <div aria-label="回复操作" role="group">
+          <button aria-label="复制回复" data-testid="copy-turn-action-button">复制回复</button>
+        </div>
+      </section>
+    `
+    document.querySelector<HTMLButtonElement>('pre button[aria-label="复制"]')?.addEventListener('click', () => {
+      clipboardText = 'const partial = true'
+    })
+    document.querySelector<HTMLButtonElement>('[data-testid="copy-turn-action-button"]')?.addEventListener('click', () => {
+      clipboardText = '完整回复开头\n\n```ts\nconst partial = true\n```\n\n完整回复结尾'
+    })
+    const response = document.querySelector('[data-message-author-role="assistant"]')!
+
+    const copied = await createChatGptAdapter({ clipboardPollMs: 5, clipboardTimeoutMs: 50 }).readResponseTextFromCopy?.(response)
+
+    expect(copied).toBe('完整回复开头\n\n```ts\nconst partial = true\n```\n\n完整回复结尾')
+    expect(clipboardText).toBe('用户原来的剪贴板')
+  })
+
   it('converts ChatGPT reply DOM to markdown when copy output is unavailable', () => {
     document.body.innerHTML = `
       <div data-message-author-role="assistant">

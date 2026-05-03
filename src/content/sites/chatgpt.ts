@@ -1,6 +1,6 @@
 import type { ChatSiteAdapter, ConversationSnapshot } from './types'
 import { keepDeepestResponseContainers } from '../responseContainers'
-import { findClickableCopyButton, readResponseTextFromCopyAction } from './clipboardCopy'
+import { readResponseTextFromCopyAction } from './clipboardCopy'
 import { readEditorText, setContentEditableText } from './contentEditable'
 import { extractMarkdownFromDom } from './domMarkdown'
 import { buttonLabelMatches, describeElement, extractCleanTextFromDom, findClosestMatchingAncestor } from './domText'
@@ -16,9 +16,11 @@ const CHATGPT_SELECTORS = {
   sendButton:
     'button[data-testid="send-button"], button[aria-label*="发送"], button[aria-label*="Send"], button[aria-label*="提交"], button[aria-label*="Submit"]',
   response: '[data-message-author-role="assistant"]',
+  responseActions: '[role="group"][aria-label="回复操作"], [role="group"][aria-label="Message actions"]',
+  turnCopyButton: 'button[data-testid="copy-turn-action-button"], button[aria-label="复制回复"], button[aria-label="Copy response"]',
   copyButton:
-    'button[data-testid="copy-turn-action-button"], button[aria-label="复制回复"], button[aria-label*="Copy"], button[aria-label*="复制"]',
-  turn: '[data-testid^="conversation-turn-"], [data-turn]',
+    'button[data-testid="copy-turn-action-button"], button[aria-label="复制回复"], button[aria-label="Copy response"], button[aria-label="复制"], button[aria-label="Copy"]',
+  turn: 'section[data-turn="assistant"][data-testid^="conversation-turn-"], [data-turn="assistant"][data-testid^="conversation-turn-"]',
 }
 
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'BUTTON', 'TEXTAREA', 'SVG'])
@@ -48,6 +50,11 @@ export function createChatGptAdapter(options: ChatGptAdapterOptions = {}): ChatS
   }
 
   function getResponseContainers(): Element[] {
+    const turnResponses = [...document.querySelectorAll(CHATGPT_SELECTORS.turn)]
+      .map(turn => findPrimaryResponseInTurn(turn))
+      .filter((response): response is Element => Boolean(response))
+    if (turnResponses.length > 0) return turnResponses
+
     return [...document.querySelectorAll(CHATGPT_SELECTORS.response)]
   }
 
@@ -91,7 +98,21 @@ async function readResponseTextFromCopy(node: Node, timeoutMs: number, pollMs: n
 
 function findCopyButton(response: Element): HTMLButtonElement | undefined {
   const turn = response.closest(CHATGPT_SELECTORS.turn) ?? response.parentElement
-  return findClickableCopyButton(turn, CHATGPT_SELECTORS.copyButton)
+  const turnActionCopyButton = findTurnActionCopyButton(turn)
+  if (turnActionCopyButton) return turnActionCopyButton
+
+  return findLastClickableCopyButton(turn, CHATGPT_SELECTORS.copyButton)
+}
+
+function findTurnActionCopyButton(turn: Element | null): HTMLButtonElement | undefined {
+  const actions = turn?.querySelector(CHATGPT_SELECTORS.responseActions)
+  const button = actions?.querySelector<HTMLButtonElement>(CHATGPT_SELECTORS.turnCopyButton)
+  return button && isClickableButton(button) ? button : undefined
+}
+
+function findLastClickableCopyButton(scope: Element | null, selectors: string): HTMLButtonElement | undefined {
+  const buttons = [...(scope?.querySelectorAll<HTMLButtonElement>(selectors) ?? [])]
+  return buttons.reverse().find(button => isClickableButton(button) && isVisibleElement(button))
 }
 
 export function getChatGptConversationLocation(href: string): ConversationSnapshot {
@@ -139,11 +160,33 @@ function extractCleanText(node: Node): string {
 }
 
 function findResponseContainer(element: Element | null): Element | null {
-  return findClosestMatchingAncestor(element, CHATGPT_SELECTORS.response)
+  const turn = element?.closest(CHATGPT_SELECTORS.turn)
+  const turnResponse = turn ? findPrimaryResponseInTurn(turn) : null
+  return turnResponse ?? findClosestMatchingAncestor(element, CHATGPT_SELECTORS.response)
 }
 
 function isChatGptGenerating(): boolean {
   return [...document.querySelectorAll('button')].some(button => {
-    return buttonLabelMatches(button, /stop|stopping|停止|中止/) && isClickableButton(button as HTMLElement)
+    return buttonLabelMatches(button, /stop|stopping|停止|中止/) && isClickableButton(button as HTMLElement) && isVisibleInteractiveElement(button)
   })
+}
+
+function findPrimaryResponseInTurn(turn: Element): Element | null {
+  return (
+    turn.querySelector('[data-message-author-role="assistant"][data-turn-start-message="true"]') ??
+    turn.querySelector('[data-message-author-role="assistant"][data-message-id]') ??
+    turn.querySelector(CHATGPT_SELECTORS.response)
+  )
+}
+
+function isVisibleElement(element: Element): boolean {
+  const style = window.getComputedStyle(element)
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false
+  return element.getClientRects().length > 0 || Boolean((element as HTMLElement).offsetParent)
+}
+
+function isVisibleInteractiveElement(element: Element): boolean {
+  const style = window.getComputedStyle(element)
+  if (style.pointerEvents === 'none') return false
+  return isVisibleElement(element)
 }

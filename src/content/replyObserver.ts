@@ -16,6 +16,7 @@ type ReplySource = 'observer' | 'timeout-compensation' | 'polling-compensation'
 
 const RESPONSE_DEBOUNCE_MS = 2500
 const RESPONSE_FINAL_SETTLE_MS = 1500
+const RESPONSE_GENERATING_STABLE_GRACE_MS = 8000
 const REPLY_POLL_INTERVAL_MS = 2000
 const REPLY_TIMEOUT_MS = 120000
 
@@ -129,6 +130,7 @@ export function createReplyObserver(options: {
 
   function startReplyPolling(messageId: string, replyAttemptId: string | undefined): void {
     clearReplyPolling()
+    replyTimeout.arm(messageId)
 
     let stableElement: Element | undefined
     let stableText = ''
@@ -158,16 +160,15 @@ export function createReplyObserver(options: {
         return
       }
 
-      const generating = siteAdapter.isGenerating()
       const candidate = findCompensationCandidate()
-      if (!candidate || generating) {
-        if (generating) log.debug('reply-poll:defer-generating', { messageId })
+      if (!candidate) {
         resetStableCandidate()
         schedule()
         return
       }
 
       const timestamp = Date.now()
+      const generating = siteAdapter.isGenerating()
       if (candidate.element !== stableElement || candidate.text !== stableText) {
         stableElement = candidate.element
         stableText = candidate.text
@@ -177,7 +178,13 @@ export function createReplyObserver(options: {
         return
       }
 
-      if (timestamp - stableSince < RESPONSE_FINAL_SETTLE_MS) {
+      const stableDuration = timestamp - stableSince
+      if (stableDuration < RESPONSE_FINAL_SETTLE_MS) {
+        schedule()
+        return
+      }
+      if (generating && stableDuration < RESPONSE_GENERATING_STABLE_GRACE_MS) {
+        log.debug('reply-poll:defer-generating', { messageId, stableDuration, textLength: candidate.text.length })
         schedule()
         return
       }
@@ -249,11 +256,21 @@ export function createReplyObserver(options: {
   }
 
   async function resolveReportableReplyText(element: Element, fallbackText: string): Promise<ReportableReplyText> {
-    const copiedText = await siteAdapter.readResponseTextFromCopy?.(element)
-    const trimmedCopiedText = copiedText?.trim()
-    if (trimmedCopiedText) return { text: trimmedCopiedText, contentFormat: 'markdown' }
-    const markdownText = siteAdapter.readResponseMarkdown?.(element).trim()
-    if (markdownText) return { text: markdownText, contentFormat: 'markdown' }
+    try {
+      const copiedText = await siteAdapter.readResponseTextFromCopy?.(element)
+      const trimmedCopiedText = copiedText?.trim()
+      if (trimmedCopiedText) return { text: trimmedCopiedText, contentFormat: 'markdown' }
+    } catch (error) {
+      log.warn('reply-copy:failed', { error: error instanceof Error ? error.message : String(error) })
+    }
+
+    try {
+      const markdownText = siteAdapter.readResponseMarkdown?.(element).trim()
+      if (markdownText) return { text: markdownText, contentFormat: 'markdown' }
+    } catch (error) {
+      log.warn('reply-markdown:failed', { error: error instanceof Error ? error.message : String(error) })
+    }
+
     return { text: fallbackText }
   }
 

@@ -12,7 +12,7 @@ export type StorePushMessage =
   | { type: 'GROUP_ROLE_STATUS_UPDATED'; store?: OpenTeamStore }
   | { type: 'GROUP_MESSAGE_DELIVERED'; store?: OpenTeamStore }
   | { type: 'GROUP_MESSAGE_RECEIVED'; store?: OpenTeamStore }
-  | { type: 'GROUP_DELIVERY_ERROR'; store?: OpenTeamStore; error?: string }
+  | { type: 'GROUP_DELIVERY_ERROR'; store?: OpenTeamStore; error?: string; message?: string }
   | { type: 'TEAM_FRAME_ROLE_READY'; chatId: string; roleId: string; store?: OpenTeamStore }
 
 export interface TeamPageRuntimeClientDependencies {

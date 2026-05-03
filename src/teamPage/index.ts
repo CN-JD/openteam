@@ -327,8 +327,15 @@ function registerRuntimePush(): void {
   chrome.runtime.onMessage.addListener((message: StorePushMessage) => {
     if (!message || typeof message.type !== 'string') return false
     if (message.type === 'TEAM_FRAME_ROLE_READY') iframeHost.markRoleReady(message.chatId, message.roleId)
-    if (message.store) applyStore(message.store)
-    if (message.type === 'GROUP_DELIVERY_ERROR' && message.error) showError(message.error)
+    if (message.store) {
+      applyStore(message.store)
+    } else if (message.type.startsWith('GROUP_') || message.type.startsWith('TEAM_')) {
+      refreshStore(false).catch(error => log.warn('runtime-push:refresh-failed', { type: message.type, error: error instanceof Error ? error.message : String(error) }))
+    }
+    if (message.type === 'GROUP_DELIVERY_ERROR') {
+      const errorMessage = message.error || message.message
+      if (errorMessage) showError(errorMessage)
+    }
     return false
   })
 }
