@@ -1,6 +1,13 @@
+// @vitest-environment jsdom
+
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { GroupChat, GroupRole, OpenTeamStore } from '../group/types'
+import { createDefaultStore } from '../group/store'
+import { createTeamPageState } from './appState'
+import { THINKING_TIMEOUT_MS } from './chatExperience'
+import { createMessagesView } from './messagesView'
 
 describe('team page messages view boundary', () => {
   it('keeps message rendering and message actions outside the team page entrypoint', () => {
@@ -17,5 +24,62 @@ describe('team page messages view boundary', () => {
     expect(entrySource).not.toContain('function renderMessageNode(message: GroupMessage')
     expect(entrySource).not.toContain('function renderMarkdownMessageBody(body: HTMLElement, content: string)')
     expect(entrySource).not.toContain('function scheduleThinkingTimeouts(): void')
+  })
+
+  it('does not mark a role as failed from the UI when a thinking bubble expires', () => {
+    const now = Date.now()
+    const chat: GroupChat = {
+      id: 'chat-1',
+      name: '群聊',
+      mode: 'independent',
+      roleIds: ['role-1'],
+      messageIds: [],
+      nextMessageSeq: 1,
+      status: 'running',
+      createdAt: now,
+      updatedAt: now,
+    }
+    const role: GroupRole = {
+      id: 'role-1',
+      chatId: chat.id,
+      name: '工程师',
+      status: 'thinking',
+      contextCursor: 0,
+      lastPromptMessageId: 'msg-1',
+      createdAt: now,
+      updatedAt: now - THINKING_TIMEOUT_MS,
+    }
+    const store: OpenTeamStore = {
+      ...createDefaultStore(),
+      currentChatId: chat.id,
+      chatOrder: [chat.id],
+      chatsById: { [chat.id]: chat },
+      rolesById: { [role.id]: role },
+    }
+    const runCommand = vi.fn(async () => undefined)
+
+    createMessagesView({
+      state: createTeamPageState(),
+      getStore: () => store,
+      messagesEl: document.createElement('section'),
+      getCurrentChat: () => chat,
+      getCurrentRoles: () => [role],
+      getCurrentMessages: () => [],
+      emptyCard: () => document.createElement('div'),
+      openAddPersonDialog: vi.fn(),
+      roleToneClass: () => 'role-tone-1',
+      roleAvatarLabel: () => '工',
+      messageTitle: message => message.roleName ?? 'AI 人员',
+      focusRoleFrame: vi.fn(),
+      setReference: vi.fn(),
+      retryRoleReply: vi.fn(async () => undefined),
+      stopRoleReply: vi.fn(async () => undefined),
+      runCommand,
+      render: vi.fn(),
+      showError: vi.fn(),
+      log: { warn: vi.fn() },
+    }).renderMessages()
+
+    expect(runCommand).not.toHaveBeenCalled()
   })
 })

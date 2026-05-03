@@ -191,6 +191,7 @@ function roleStatusLabel(status: RoleStatus): string {
     loading: '加载中',
     ready: '就绪',
     thinking: '回复中',
+    stopped: '已停止',
     error: '异常',
   }
   return labels[status]

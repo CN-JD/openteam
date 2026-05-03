@@ -79,6 +79,7 @@ export function createClaudeAdapter(options: ClaudeAdapterOptions = {}): ChatSit
     readResponseMarkdown: extractMarkdownFromDom,
     findResponseContainer,
     isGenerating: isClaudeGenerating,
+    stopGenerating: stopClaudeGenerating,
     fillAndSend,
     collectPromptDiagnostics,
   }
@@ -148,7 +149,16 @@ function findCopyButton(response: Element): HTMLButtonElement | undefined {
 }
 
 function isClaudeGenerating(): boolean {
-  return [...document.querySelectorAll('button')].some(button => {
-    return buttonLabelMatches(button, /stop|stopping|停止|中止/) && isClickableButton(button as HTMLElement)
-  })
+  return Boolean(findClaudeStopButton())
+}
+
+async function stopClaudeGenerating(): Promise<boolean> {
+  const button = findClaudeStopButton()
+  if (!button) return false
+  button.click()
+  return true
+}
+
+function findClaudeStopButton(): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => buttonLabelMatches(button, /stop|stopping|停止|中止/) && isClickableButton(button))
 }

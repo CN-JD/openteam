@@ -47,8 +47,13 @@ export function getVisibleThinkingRoles(roles: GroupRole[], now = Date.now()): G
   return roles.filter(role => isThinkingBubbleVisible(role, now))
 }
 
+export function getStoppedReplyRoles(roles: GroupRole[]): GroupRole[] {
+  return roles.filter(role => role.status === 'stopped' && Boolean(role.lastPromptMessageId))
+}
+
 export function shouldAutoReconnectRole(role: Pick<GroupRole, 'status' | 'updatedAt'>, now = Date.now()): boolean {
   if (role.status === 'ready') return false
+  if (role.status === 'stopped') return false
   if (role.status !== 'thinking') return true
   return now - role.updatedAt >= THINKING_TIMEOUT_MS
 }

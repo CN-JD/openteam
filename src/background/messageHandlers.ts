@@ -3,6 +3,7 @@ import { extractSupportedConversationId, normalizeSupportedChatConversationUrl }
 import { parseGroupMentions } from '../group/mentionParser'
 import { buildPrompt } from '../group/promptBuilder'
 import { mapRuntimeRoleStatus } from '../group/runtimeProtocol'
+import type { BackgroundToRoleMessage } from '../group/runtimeProtocol'
 import type { GroupChat, GroupMessage, GroupRole, MessageReference, OpenTeamStore, RuntimeFrameBinding } from '../group/types'
 import type { BackgroundMessageRoute } from './messageRouter'
 import type { PromptDelivery, PromptSender } from './promptDelivery'
@@ -14,6 +15,7 @@ const STALE_THINKING_MS = 120_000
 
 export const MESSAGE_ROUTE_TYPES = [
   'GROUP_ROLE_RETRY_REPLY',
+  'GROUP_ROLE_STOP_REPLY',
   'GROUP_MESSAGE_SEND',
   'TEAM_FRAME_ROLE_READY',
   'TEAM_ROLE_CONVERSATION_UPDATED',
@@ -34,6 +36,7 @@ export interface MessageHandlersDependencies {
   newId(prefix: string): string
   now(): number
   runtimeFrames: Pick<RuntimeFrameRegistry, 'bind' | 'getByAddress' | 'getByRole'>
+  sendRoleMessage(tabId: number, frameId: number, message: BackgroundToRoleMessage): Promise<unknown>
   sendError(reason: string): Promise<void> | void
   sendPrompt: PromptSender
 }
@@ -212,6 +215,47 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
     return { ok: true, store, messageId: result.delivery.message.messageId }
   }
 
+  const handleRoleStopReply = async (message: RuntimeMessage) => {
+    const chatId = requireString(message.chatId, '缺少群聊 ID')
+    const roleId = requireString(message.roleId, '缺少人员 ID')
+    const binding = deps.runtimeFrames.getByRole(chatId, roleId)
+    if (!binding?.ready) throw new Error('人员 iframe 尚未就绪，无法停止回复')
+
+    const { result: active } = await mutateStore(store => {
+      const chat = requireChat(store, chatId)
+      const role = requireRole(store, chat.id, roleId)
+      if (role.status !== 'thinking' || !role.lastPromptMessageId) throw new Error('该人员当前没有正在回复的任务')
+      return {
+        messageId: role.lastPromptMessageId,
+        replyAttemptId: role.replyAttemptId,
+      }
+    })
+
+    const response = await deps.sendRoleMessage(binding.tabId, binding.frameId, {
+      type: 'TEAM_STOP_GENERATION',
+      chatId,
+      roleId,
+      messageId: active.messageId,
+      replyAttemptId: active.replyAttemptId,
+    })
+    if (isRecord(response) && response.ok === false) throw new Error(readOptionalString(response.error) ?? '停止回复失败')
+
+    const timestamp = deps.now()
+    const { store } = await mutateStore(store => {
+      const chat = requireChat(store, chatId)
+      const role = requireRole(store, chat.id, roleId)
+      if (role.lastPromptMessageId !== active.messageId) return
+      role.status = 'stopped'
+      role.replyAttemptId = deps.newId('stopped')
+      role.updatedAt = timestamp
+      chat.status = deps.getChatStatusFromRoles(store, chat)
+      chat.updatedAt = timestamp
+    })
+    deps.log.info('role-stop-reply:stopped', { chatId, roleId, messageId: active.messageId, tabId: binding.tabId, frameId: binding.frameId })
+    await deps.broadcastStoreUpdated(store)
+    return { ok: true, store, messageId: active.messageId }
+  }
+
   const handleFrameRoleReady = async (message: RuntimeMessage, sender: chrome.runtime.MessageSender) => {
     const tabId = messageTabId(message, sender)
     if (tabId === undefined) throw new Error('缺少 sender tab')
@@ -309,6 +353,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       role.updatedAt = timestamp
       if (mappedStatus === 'ready' || mappedStatus === 'error') delete role.lastPromptMessageId
       if (mappedStatus === 'ready' || mappedStatus === 'error') delete role.replyAttemptId
+      if (mappedStatus === 'stopped') role.replyAttemptId = deps.newId('stopped')
       chat.status = deps.getChatStatusFromRoles(store, chat)
       chat.updatedAt = timestamp
       return role
@@ -415,6 +460,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
 
   return [
     { type: 'GROUP_ROLE_RETRY_REPLY', handler: handleRoleRetryReply },
+    { type: 'GROUP_ROLE_STOP_REPLY', handler: handleRoleStopReply },
     { type: 'GROUP_MESSAGE_SEND', handler: handleMessageSend },
     {
       type: 'TEAM_FRAME_ROLE_READY',
@@ -514,7 +560,7 @@ function isStaleThinkingRole(role: GroupRole, timestamp: number): boolean {
 
 function isRoleDeliverable(role: GroupRole, binding: RuntimeFrameBinding | undefined, timestamp: number): boolean {
   if (!binding?.ready) return false
-  return role.status === 'ready' || role.status === 'error' || role.status === 'loading' || role.status === 'pending' || isStaleThinkingRole(role, timestamp)
+  return role.status === 'ready' || role.status === 'error' || role.status === 'stopped' || role.status === 'loading' || role.status === 'pending' || isStaleThinkingRole(role, timestamp)
 }
 
 function recoverDeliverableRoleStatus(role: GroupRole, timestamp: number, log: MessageHandlersDependencies['log']): void {

@@ -10,6 +10,7 @@ export interface RoleReadyWaiter {
   resolve: () => void
   reject: (error: Error) => void
   timeoutId: number
+  pollTimeoutId?: number
 }
 
 export interface TeamPageState {

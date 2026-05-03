@@ -89,6 +89,7 @@ export function createGeminiAdapter(options: GeminiAdapterOptions = {}): ChatSit
     readResponseMarkdown: extractMarkdownFromDom,
     findResponseContainer,
     isGenerating: isGeminiGenerating,
+    stopGenerating: stopGeminiGenerating,
     fillAndSend,
     collectPromptDiagnostics,
   }
@@ -152,7 +153,16 @@ function findCopyButton(response: Element): HTMLButtonElement | undefined {
 }
 
 function isGeminiGenerating(): boolean {
-  return [...document.querySelectorAll('button')].some(button => {
-    return buttonLabelMatches(button, /stop|stopping|停止|中止/) && isClickableButton(button as HTMLElement)
-  })
+  return Boolean(findGeminiStopButton())
+}
+
+async function stopGeminiGenerating(): Promise<boolean> {
+  const button = findGeminiStopButton()
+  if (!button) return false
+  button.click()
+  return true
+}
+
+function findGeminiStopButton(): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => buttonLabelMatches(button, /stop|stopping|停止|中止/) && isClickableButton(button))
 }

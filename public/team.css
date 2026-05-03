@@ -748,6 +748,7 @@ select:focus {
 }
 
 .status-thinking,
+.status-stopped,
 .status-running,
 .status-loading,
 .status-initializing {
@@ -1003,8 +1004,18 @@ select:focus {
   color: #d8f1dc;
 }
 
-.message-row.thinking .message-bubble::before {
+.message-row.stopped .message-bubble {
+  background: #252522;
+  color: #efe4c8;
+}
+
+.message-row.thinking .message-bubble::before,
+.message-row.stopped .message-bubble::before {
   border-right-color: #232a22;
+}
+
+.message-row.stopped .message-bubble::before {
+  border-right-color: #252522;
 }
 
 .message-mentions {
@@ -1125,14 +1136,30 @@ select:focus {
   padding: 0 8px 7px;
 }
 
-.message-row.thinking .message-tools {
+.message-row.thinking .message-body,
+.message-row.stopped .message-body {
+  min-width: 180px;
+  padding-right: 46px;
+}
+
+.message-row.thinking .message-tools,
+.message-row.stopped .message-tools {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  transform: translateY(-50%);
+  margin: 0;
+  padding: 0;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.14s ease;
 }
 
 .message-row.thinking:hover .message-tools,
-.message-row.thinking:focus-within .message-tools {
+.message-row.thinking:focus-within .message-tools,
+.message-row.stopped .message-tools,
+.message-row.stopped:hover .message-tools,
+.message-row.stopped:focus-within .message-tools {
   opacity: 1;
   pointer-events: auto;
 }

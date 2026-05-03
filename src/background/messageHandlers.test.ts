@@ -64,12 +64,14 @@ describe('background message handlers', () => {
         getByAddress: vi.fn(),
         getByRole: vi.fn(() => binding),
       },
+      sendRoleMessage: vi.fn(),
       sendError: vi.fn(),
       sendPrompt,
     })
 
     expect(MESSAGE_ROUTE_TYPES).toEqual([
       'GROUP_ROLE_RETRY_REPLY',
+      'GROUP_ROLE_STOP_REPLY',
       'GROUP_MESSAGE_SEND',
       'TEAM_FRAME_ROLE_READY',
       'TEAM_ROLE_CONVERSATION_UPDATED',

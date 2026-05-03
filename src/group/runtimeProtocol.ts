@@ -5,6 +5,7 @@ export type RuntimeRoleStatus =
   | 'online'
   | 'sending'
   | 'generating'
+  | 'stopped'
   | 'idle'
   | 'offline'
   | 'error'
@@ -20,7 +21,15 @@ export type SendPromptMessage = {
   includesPersona?: boolean
 }
 
-export type BackgroundToRoleMessage = SendPromptMessage
+export type StopGenerationMessage = {
+  type: 'TEAM_STOP_GENERATION'
+  chatId: string
+  roleId: string
+  messageId?: string
+  replyAttemptId?: string
+}
+
+export type BackgroundToRoleMessage = SendPromptMessage | StopGenerationMessage
 
 export type RoleToBackgroundMessage =
   | { type: 'TEAM_FRAME_ROLE_READY'; chatId?: string; roleId: string; hostTabId?: number; conversationId: string; conversationUrl?: string }
@@ -56,6 +65,8 @@ export function mapRuntimeRoleStatus(value: unknown): RoleStatus | undefined {
     case 'sending':
     case 'generating':
       return 'thinking'
+    case 'stopped':
+      return 'stopped'
     case 'online':
     case 'idle':
       return 'ready'

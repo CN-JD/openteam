@@ -1,9 +1,9 @@
 import MarkdownIt from 'markdown-it'
 import type { GroupChat, GroupMessage, GroupRole, MessageReference, OpenTeamStore } from '../group/types'
 import type { TeamPageState } from './appState'
-import { buildChatRenderItems, getChatStartupNotice, getVisibleThinkingRoles, THINKING_TIMEOUT_MS } from './chatExperience'
+import { buildChatRenderItems, getChatStartupNotice, getStoppedReplyRoles, getVisibleThinkingRoles, THINKING_TIMEOUT_MS } from './chatExperience'
 
-type MessageActionIcon = 'copy' | 'quote' | 'jump' | 'check'
+type MessageActionIcon = 'copy' | 'quote' | 'jump' | 'check' | 'stop' | 'retry'
 
 const MAX_CACHED_MESSAGE_NODES = 400
 const COPY_FEEDBACK_MS = 1200
@@ -24,7 +24,8 @@ export interface MessagesViewDependencies {
   focusRoleFrame(chatId: string, roleId: string | undefined): void
   insertMention(role: GroupRole): void
   setReference(message: GroupMessage): void
-  interruptAndRetryRole(role: GroupRole): Promise<void>
+  retryRoleReply(role: GroupRole): Promise<void>
+  stopRoleReply(role: GroupRole): Promise<void>
   runCommand(type: string, payload?: Record<string, unknown>): Promise<void>
   render(): void
   showError(message: string): void
@@ -70,7 +71,10 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
     }
 
     for (const role of getVisibleThinkingRoles(deps.getCurrentRoles())) {
-      deps.messagesEl.append(thinkingBubble(role))
+      deps.messagesEl.append(replyControlBubble(role))
+    }
+    for (const role of getStoppedReplyRoles(deps.getCurrentRoles())) {
+      deps.messagesEl.append(replyControlBubble(role))
     }
     scheduleThinkingTimeouts()
     deps.messagesEl.scrollTop = deps.messagesEl.scrollHeight
@@ -204,6 +208,8 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
     if (icon === 'copy') return 'M8 7.5A2.5 2.5 0 0 1 10.5 5h6A2.5 2.5 0 0 1 19 7.5v6A2.5 2.5 0 0 1 16.5 16h-6A2.5 2.5 0 0 1 8 13.5v-6Zm-3 3A2.5 2.5 0 0 1 7.5 8H8v5.5a2.5 2.5 0 0 0 2.5 2.5H16v.5a2.5 2.5 0 0 1-2.5 2.5h-6A2.5 2.5 0 0 1 5 16.5v-6Z'
     if (icon === 'quote') return 'M7.2 6.5c-1.7 1.4-2.7 3-2.7 5.1 0 1.9 1.1 3.2 2.8 3.2 1.3 0 2.3-.9 2.3-2.2 0-1.2-.8-2-2-2.1.2-1.1.9-2 2.1-3l-1.1-1.4c-.5.1-1 .2-1.4.4Zm8 0c-1.7 1.4-2.7 3-2.7 5.1 0 1.9 1.1 3.2 2.8 3.2 1.3 0 2.3-.9 2.3-2.2 0-1.2-.8-2-2-2.1.2-1.1.9-2 2.1-3l-1.1-1.4c-.5.1-1 .2-1.4.4Z'
     if (icon === 'check') return 'M9.2 16.4 4.8 12l1.4-1.4 3 3 8.6-8.6 1.4 1.4-10 10Z'
+    if (icon === 'stop') return 'M7.5 6h9A1.5 1.5 0 0 1 18 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 16.5v-9A1.5 1.5 0 0 1 7.5 6Z'
+    if (icon === 'retry') return 'M12 5a7 7 0 1 1-6.3 4H4a9 9 0 1 0 2.6-4.4L4 2v7h7L8.1 6.1A7 7 0 0 1 12 5Z'
     return 'M14 5h5v5h-1.6V7.7l-7.1 7.1-1.1-1.1 7.1-7.1H14V5ZM6.5 6h4v1.6h-4a.9.9 0 0 0-.9.9v9a.9.9 0 0 0 .9.9h9a.9.9 0 0 0 .9-.9v-4H18v4A2.5 2.5 0 0 1 15.5 20h-9A2.5 2.5 0 0 1 4 17.5v-9A2.5 2.5 0 0 1 6.5 6Z'
   }
 
@@ -283,12 +289,6 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
         if (!deps.state.loggedThinkingTimeoutRoleIds.has(role.id)) {
           deps.state.loggedThinkingTimeoutRoleIds.add(role.id)
           deps.log.warn('ui:thinking-bubble:timeout', { chatId: role.chatId, roleId: role.id, timeoutMs: THINKING_TIMEOUT_MS })
-          deps.runCommand('TEAM_ROLE_ERROR', {
-            chatId: role.chatId,
-            roleId: role.id,
-            messageId: role.lastPromptMessageId,
-            reason: `等待 ${role.name} 回复超时（${Math.round(THINKING_TIMEOUT_MS / 1000)} 秒）`,
-          }).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
         }
         continue
       }
@@ -297,9 +297,10 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
     }
   }
 
-  function thinkingBubble(role: GroupRole, showName = true, showAvatar = true): HTMLElement {
+  function replyControlBubble(role: GroupRole, showName = true, showAvatar = true): HTMLElement {
+    const stopped = role.status === 'stopped'
     const article = document.createElement('article')
-    article.className = `message-row message assistant thinking${showName ? '' : ' compact'}${showAvatar ? '' : ' no-avatar'}`
+    article.className = `message-row message assistant ${stopped ? 'stopped' : 'thinking'}${showName ? '' : ' compact'}${showAvatar ? '' : ' no-avatar'}`
     const inner = document.createElement('div')
     inner.className = 'message-inner'
     const avatar = document.createElement('div')
@@ -322,17 +323,16 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
     const bubble = document.createElement('div')
     bubble.className = 'message-bubble'
     const body = document.createElement('div')
-    body.className = 'message-body thinking-dots'
-    body.textContent = `${role.name} 正在回复中 `
+    body.className = `message-body${stopped ? '' : ' thinking-dots'}`
+    body.textContent = stopped ? `${role.name} 已停止回复` : `${role.name} 正在回复中 `
     bubble.append(body)
     const tools = document.createElement('div')
     tools.className = 'message-tools'
-    const retry = document.createElement('button')
-    retry.type = 'button'
-    retry.className = 'btn btn-ghost'
-    retry.textContent = '打断重试'
-    retry.addEventListener('click', () => deps.interruptAndRetryRole(role).catch(error => deps.showError(error instanceof Error ? error.message : String(error))))
-    tools.append(retry)
+    tools.append(
+      stopped
+        ? createMessageIconButton('重新发送', 'retry', () => deps.retryRoleReply(role).catch(error => deps.showError(error instanceof Error ? error.message : String(error))))
+        : createMessageIconButton('停止回复', 'stop', () => deps.stopRoleReply(role).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))),
+    )
     bubble.append(tools)
     stack.append(bubble)
     inner.append(avatar, stack)

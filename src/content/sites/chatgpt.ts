@@ -87,6 +87,7 @@ export function createChatGptAdapter(options: ChatGptAdapterOptions = {}): ChatS
     readResponseMarkdown: extractMarkdownFromDom,
     findResponseContainer,
     isGenerating: isChatGptGenerating,
+    stopGenerating: stopChatGptGenerating,
     fillAndSend,
     collectPromptDiagnostics,
   }
@@ -166,9 +167,18 @@ function findResponseContainer(element: Element | null): Element | null {
 }
 
 function isChatGptGenerating(): boolean {
-  return [...document.querySelectorAll('button')].some(button => {
-    return buttonLabelMatches(button, /stop|stopping|停止|中止/) && isClickableButton(button as HTMLElement) && isVisibleInteractiveElement(button)
-  })
+  return Boolean(findChatGptStopButton())
+}
+
+async function stopChatGptGenerating(): Promise<boolean> {
+  const button = findChatGptStopButton()
+  if (!button) return false
+  button.click()
+  return true
+}
+
+function findChatGptStopButton(): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => buttonLabelMatches(button, /stop|stopping|停止|中止/) && isClickableButton(button) && isVisibleInteractiveElement(button))
 }
 
 function findPrimaryResponseInTurn(turn: Element): Element | null {

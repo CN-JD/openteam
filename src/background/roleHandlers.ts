@@ -156,8 +156,13 @@ export function createRoleHandlers(deps: RoleHandlersDependencies): BackgroundMe
       const chat = requireChat(store, message.chatId)
       const role = requireRole(store, chat.id, message.roleId)
       const wasThinking = role.status === 'thinking'
+      const wasStopped = role.status === 'stopped'
       role.status = 'loading'
       if (wasThinking && role.lastPromptMessageId) role.replyAttemptId = deps.newId('attempt')
+      if (wasStopped) {
+        delete role.lastPromptMessageId
+        delete role.replyAttemptId
+      }
       role.updatedAt = deps.now()
       chat.status = 'initializing'
       chat.updatedAt = role.updatedAt

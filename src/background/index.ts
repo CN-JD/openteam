@@ -15,11 +15,16 @@ import { createRoleHandlers } from './roleHandlers'
 import { createRuntimeFrameRegistry } from './runtimeFrames'
 import { getChatRoles, mutateStore } from './storeAccess'
 import { createLogger } from '../shared/logger'
+import type { BackgroundToRoleMessage } from '../group/runtimeProtocol'
 
 const runtimeFrames = createRuntimeFrameRegistry()
 const log = createLogger('background')
 
 const sendPrompt = createPromptSender({ log })
+
+function sendRoleMessage(tabId: number, frameId: number, message: BackgroundToRoleMessage): Promise<unknown> {
+  return chrome.tabs.sendMessage(tabId, message, { frameId })
+}
 
 function now(): number {
   return Date.now()
@@ -68,7 +73,7 @@ const routeMessage = createMessageRouter([
   ...createChatHandlers({ broadcastStoreUpdated, getChatStatusFromRoles, log, newId, now, runtimeFrames }),
   { type: 'GROUP_SETTINGS_UPDATE', handler: handleSettingsUpdate },
   ...createRoleHandlers({ broadcastStoreUpdated, log, newId, now, runtimeFrames, sendPrompt }),
-  ...createMessageHandlers({ broadcastStoreUpdated, getChatStatusFromRoles, log, newId, now, runtimeFrames, sendError, sendPrompt }),
+  ...createMessageHandlers({ broadcastStoreUpdated, getChatStatusFromRoles, log, newId, now, runtimeFrames, sendError, sendPrompt, sendRoleMessage }),
 ])
 
 chrome.runtime.onInstalled.addListener(() => {

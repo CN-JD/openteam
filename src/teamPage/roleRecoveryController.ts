@@ -2,7 +2,8 @@ import type { GroupChat, GroupRole, OpenTeamStore } from '../group/types'
 import type { RoleReadyWaiter, TeamPageState } from './appState'
 import { shouldAutoReconnectRole } from './chatExperience'
 
-const AUTO_RECONNECT_TIMEOUT_MS = 20_000
+const AUTO_RECONNECT_TIMEOUT_MS = 90_000
+const ROLE_READY_POLL_MS = 1_000
 
 interface RoleRecoveryIframeHost {
   focusRoleFrame(chatId: string, roleId: string): boolean
@@ -27,10 +28,11 @@ export interface RoleRecoveryDependencies {
 
 export interface RoleRecoveryController {
   focusRoleFrame(chatId: string, roleId: string | undefined): void
-  interruptAndRetryRole(role: GroupRole): Promise<void>
   notifyRoleReadyWaiters(): void
   reconnectRolesForSend(chat: GroupChat, roles: GroupRole[]): Promise<void>
   refreshCurrentChat(): Promise<void>
+  retryRoleReply(role: GroupRole): Promise<void>
+  stopRoleReply(role: GroupRole): Promise<void>
 }
 
 export function createRoleRecoveryController(deps: RoleRecoveryDependencies): RoleRecoveryController {
@@ -59,8 +61,6 @@ export function createRoleRecoveryController(deps: RoleRecoveryDependencies): Ro
   function notifyRoleReadyWaiters(): void {
     for (const waiter of [...deps.state.roleReadyWaiters]) {
       if (!areRolesReady(waiter.chatId, [...waiter.roleIds])) continue
-      window.clearTimeout(waiter.timeoutId)
-      deps.state.roleReadyWaiters.delete(waiter)
       waiter.resolve()
     }
   }
@@ -70,17 +70,41 @@ export function createRoleRecoveryController(deps: RoleRecoveryDependencies): Ro
     if (areRolesReady(chatId, uniqueRoleIds)) return Promise.resolve()
 
     return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        window.clearTimeout(waiter.timeoutId)
+        if (waiter.pollTimeoutId !== undefined) window.clearTimeout(waiter.pollTimeoutId)
+        deps.state.roleReadyWaiters.delete(waiter)
+      }
+      const resolveReady = () => {
+        cleanup()
+        resolve()
+      }
+      const rejectTimeout = () => {
+        cleanup()
+        reject(new Error(`等待人员恢复超时：${roleLabels(chatId, uniqueRoleIds).join('、')}`))
+      }
+      const schedulePoll = () => {
+        waiter.pollTimeoutId = window.setTimeout(() => {
+          deps.refreshStore(false)
+            .then(() => {
+              if (areRolesReady(chatId, uniqueRoleIds)) {
+                resolveReady()
+                return
+              }
+              schedulePoll()
+            })
+            .catch(() => schedulePoll())
+        }, ROLE_READY_POLL_MS)
+      }
       const waiter: RoleReadyWaiter = {
         chatId,
         roleIds: new Set(uniqueRoleIds),
-        resolve,
+        resolve: resolveReady,
         reject,
-        timeoutId: window.setTimeout(() => {
-          deps.state.roleReadyWaiters.delete(waiter)
-          reject(new Error(`等待人员恢复超时：${uniqueRoleIds.join(', ')}`))
-        }, timeoutMs),
+        timeoutId: window.setTimeout(rejectTimeout, timeoutMs),
       }
       deps.state.roleReadyWaiters.add(waiter)
+      schedulePoll()
     })
   }
 
@@ -115,16 +139,29 @@ export function createRoleRecoveryController(deps: RoleRecoveryDependencies): Ro
     deps.iframeHost.recoverRole(role)
   }
 
-  async function interruptAndRetryRole(role: GroupRole): Promise<void> {
+  async function stopRoleReply(role: GroupRole): Promise<void> {
     const chat = deps.getStore().chatsById[role.chatId]
     if (!chat) return
-    await deps.runCommand('GROUP_ROLE_RECOVER', { chatId: chat.id, roleId: role.id })
-    deps.iframeHost.recoverRole(role)
-    await waitForRolesReady(chat.id, [role.id])
-    await deps.runCommand('GROUP_ROLE_RETRY_REPLY', { chatId: chat.id, roleId: role.id })
+    await deps.runCommand('GROUP_ROLE_STOP_REPLY', { chatId: chat.id, roleId: role.id })
+    await deps.refreshStore(false)
   }
 
-  return { focusRoleFrame, interruptAndRetryRole, notifyRoleReadyWaiters, reconnectRolesForSend, refreshCurrentChat }
+  async function retryRoleReply(role: GroupRole): Promise<void> {
+    const chat = deps.getStore().chatsById[role.chatId]
+    if (!chat) return
+    await deps.runCommand('GROUP_ROLE_RETRY_REPLY', { chatId: chat.id, roleId: role.id, messageId: role.lastPromptMessageId })
+    await deps.refreshStore(false)
+  }
+
+  return { focusRoleFrame, notifyRoleReadyWaiters, reconnectRolesForSend, refreshCurrentChat, retryRoleReply, stopRoleReply }
+
+  function roleLabels(chatId: string, roleIds: string[]): string[] {
+    const store = deps.getStore()
+    return roleIds.map(roleId => {
+      const role = store.rolesById[roleId]
+      return role?.chatId === chatId && role.name.trim() ? role.name : roleId
+    })
+  }
 }
 
 function teamRoleKey(chatId: string, roleId: string): string {

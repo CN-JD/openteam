@@ -124,7 +124,8 @@ const refreshCurrentChat = roleRecoveryController.refreshCurrentChat
 const notifyRoleReadyWaiters = roleRecoveryController.notifyRoleReadyWaiters
 const reconnectRolesForSend = roleRecoveryController.reconnectRolesForSend
 const focusRoleFrame = roleRecoveryController.focusRoleFrame
-const interruptAndRetryRole = roleRecoveryController.interruptAndRetryRole
+const retryRoleReply = roleRecoveryController.retryRoleReply
+const stopRoleReply = roleRecoveryController.stopRoleReply
 const composerView = createComposerView({
   state: appState,
   composerFormEl,
@@ -209,7 +210,8 @@ const messagesView = createMessagesView({
   focusRoleFrame,
   insertMention,
   setReference,
-  interruptAndRetryRole,
+  retryRoleReply,
+  stopRoleReply,
   runCommand,
   render,
   showError,

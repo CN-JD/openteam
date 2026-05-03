@@ -3,7 +3,7 @@ export type ChatSite = 'gemini' | 'chatgpt' | 'claude'
 
 export type ChatStatus = 'draft' | 'initializing' | 'ready' | 'running' | 'error'
 
-export type RoleStatus = 'pending' | 'loading' | 'ready' | 'thinking' | 'error'
+export type RoleStatus = 'pending' | 'loading' | 'ready' | 'thinking' | 'stopped' | 'error'
 
 export type DeliveryStatus = 'pending' | 'sent' | 'received' | 'error'
 

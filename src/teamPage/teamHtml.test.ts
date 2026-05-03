@@ -268,7 +268,10 @@ describe('team.html chat creation UI', () => {
     expect(html).not.toMatch(/\.message-row\.assistant:hover \.message-tools/)
     expect(html).toMatch(/\.message-row\.thinking \.message-tools\s*{[^}]*opacity:\s*0;/s)
     expect(html).toMatch(/\.message-row\.thinking:hover \.message-tools,/s)
-    expect(source).toContain("retry.textContent = '打断重试'")
+    expect(source).toContain("createMessageIconButton('停止回复'")
+    expect(source).toContain("createMessageIconButton('重新发送'")
+    expect(source).not.toContain("打断重试")
+    expect(recoverySource).toContain("runCommand('GROUP_ROLE_STOP_REPLY'")
     expect(recoverySource).toContain("runCommand('GROUP_ROLE_RETRY_REPLY'")
   })
 

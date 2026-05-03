@@ -83,11 +83,54 @@ function reportRoleError(
 
 function registerMessageHandlers(): void {
   chrome.runtime.onMessage.addListener((message: ContentRuntimeMessage, _sender, sendResponse) => {
-    if (message?.type !== 'TEAM_SEND_PROMPT') return false
+    if (message?.type === 'TEAM_SEND_PROMPT') {
+      handleSendPromptMessage(message, sendResponse)
+      return true
+    }
 
-    handleSendPromptMessage(message, sendResponse)
-    return true
+    if (message?.type === 'TEAM_STOP_GENERATION') {
+      handleStopGenerationMessage(message, sendResponse)
+      return true
+    }
+
+    return false
   })
+}
+
+function handleStopGenerationMessage(message: Extract<BackgroundToRoleMessage, { type: 'TEAM_STOP_GENERATION' }>, sendResponse: (response?: unknown) => void): void {
+  const activePrompt = roleSession.getActivePrompt()
+  log.info('message:stop-generation', {
+    chatId: message.chatId,
+    roleId: message.roleId,
+    messageId: message.messageId,
+    activeMessageId: activePrompt?.messageId,
+  })
+
+  if (
+    activePrompt &&
+    ((message.messageId && activePrompt.messageId !== message.messageId) ||
+      (message.replyAttemptId && activePrompt.replyAttemptId && activePrompt.replyAttemptId !== message.replyAttemptId))
+  ) {
+    sendResponse({ ok: false, error: '当前回复已经切换，停止请求已过期' })
+    return
+  }
+
+  siteAdapter
+    .stopGenerating()
+    .then(stopped => {
+      if (!stopped) {
+        sendResponse({ ok: false, error: '当前页面没有可点击的停止按钮' })
+        return
+      }
+
+      roleSession.clearActivePrompt(message.messageId)
+      replyObserver?.clearPromptReplyBaseline()
+      replyObserver?.clearReplyPolling()
+      sendResponse({ ok: true })
+    })
+    .catch(error => {
+      sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) })
+    })
 }
 
 function handleSendPromptMessage(message: Extract<BackgroundToRoleMessage, { type: 'TEAM_SEND_PROMPT' }>, sendResponse: (response?: unknown) => void): void {
