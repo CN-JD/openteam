@@ -72,12 +72,14 @@ describe('background message handlers', () => {
     expect(MESSAGE_ROUTE_TYPES).toEqual([
       'GROUP_ROLE_RETRY_REPLY',
       'GROUP_ROLE_STOP_REPLY',
+      'GROUP_MESSAGE_RESYNC_REPLY',
       'GROUP_MESSAGE_SEND',
       'TEAM_FRAME_ROLE_READY',
       'TEAM_ROLE_CONVERSATION_UPDATED',
       'TEAM_SEND_ACK',
       'TEAM_ROLE_STATUS',
       'TEAM_ROLE_REPLY',
+      'TEAM_ROLE_REPLY_RESYNC',
       'TEAM_ROLE_ERROR',
     ])
     expect(routes.map(route => route.type)).toEqual(MESSAGE_ROUTE_TYPES)
