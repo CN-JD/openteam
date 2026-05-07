@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import { DEFAULT_CUSTOM_ROLE_TEMPLATES } from '../group/defaultCustomRoleTemplates'
 import { createDefaultStore } from '../group/store'
 import type { OpenTeamStore } from '../group/types'
+
+const defaultCustomTemplateIds = DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => template.id)
 
 describe('background role handlers', () => {
   it('exposes template and role routes and creates a role template through injected dependencies', async () => {
@@ -63,7 +66,7 @@ describe('background role handlers', () => {
         defaultChatSite: 'chatgpt',
       },
     })
-    expect(draftStore?.roleTemplateOrder).toEqual(['template-1'])
+    expect(draftStore?.roleTemplateOrder).toEqual([...defaultCustomTemplateIds, 'template-1'])
     expect(broadcastStoreUpdated).toHaveBeenCalledWith(expect.objectContaining({
       roleTemplatesById: expect.objectContaining({ 'template-1': expect.any(Object) }),
     }))

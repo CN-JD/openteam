@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createDefaultStore } from '../group/store'
+import { getAllRoleTemplates } from '../group/roleTemplates'
 import type { GroupChat, OpenTeamStore, RoleTemplate } from '../group/types'
 import { createTeamPageState } from './appState'
 import { createPeopleLibraryView } from './peopleLibraryView'
@@ -477,6 +478,27 @@ describe('team page people library view boundary', () => {
     expect(addLibraryPeopleListEl.textContent).toContain('人员1')
     expect(addLibraryPeopleListEl.textContent).not.toContain('弗兰克尔')
     expect(addPersonCustomTabEl.className).toContain('active')
+  })
+
+  it('shows default custom people in the add-person custom tab for a default store', () => {
+    const store = createDefaultStore()
+    const chat = makeChat('chat-1')
+    store.currentChatId = chat.id
+    store.chatOrder = [chat.id]
+    store.chatsById[chat.id] = chat
+    const { view, addLibraryPeopleListEl, addPersonCustomTabEl } = setupPeopleLibraryView({
+      store,
+      templates: getAllRoleTemplates(store),
+      currentChat: chat,
+    })
+
+    view.registerPeopleLibraryEvents()
+    view.renderAddPersonDialog()
+    addPersonCustomTabEl.click()
+
+    expect(addLibraryPeopleListEl.textContent).toContain('产品经理')
+    expect(addLibraryPeopleListEl.textContent).toContain('工程师')
+    expect(addLibraryPeopleListEl.textContent).toContain('增长顾问')
   })
 
   it('searches add-person choices by name, description, and persona text', () => {

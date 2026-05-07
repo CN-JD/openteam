@@ -12,6 +12,7 @@ import {
   updateStoreQueued,
 } from './store'
 import { BUILTIN_ROLE_TEMPLATES } from './builtinRoleTemplates'
+import { DEFAULT_CUSTOM_ROLE_TEMPLATES } from './defaultCustomRoleTemplates'
 import type { GroupMessage, OpenTeamStore } from './types'
 
 describe('group store', () => {
@@ -54,8 +55,8 @@ describe('group store', () => {
       chatsById: {},
       rolesById: {},
       messagesById: {},
-      roleTemplateOrder: [],
-      roleTemplatesById: {},
+      roleTemplateOrder: DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => template.id),
+      roleTemplatesById: Object.fromEntries(DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => [template.id, template])),
       globalNote: undefined,
       chatNotesById: {},
       messageHighlightsById: {},
@@ -108,8 +109,8 @@ describe('group store', () => {
       chatOrder: ['chat-1'],
       rolesById: {},
       messagesById: {},
-      roleTemplateOrder: [],
-      roleTemplatesById: {},
+      roleTemplateOrder: DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => template.id),
+      roleTemplatesById: Object.fromEntries(DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => [template.id, template])),
       settings: {
         defaultMode: 'collaborative',
         maxContextChars: 6000,
@@ -117,6 +118,47 @@ describe('group store', () => {
         externalModelOrder: [],
         externalModelsById: {},
       },
+    })
+  })
+
+  it('seeds existing empty stores with default custom role templates once', async () => {
+    stored[META_STORE_KEY] = {
+      version: CURRENT_STORE_VERSION - 1,
+      chatOrder: [],
+      roleTemplateOrder: [],
+      roleTemplatesById: {},
+      settings: {
+        defaultMode: 'independent',
+        defaultChatSite: 'gemini',
+      },
+    }
+
+    const store = await loadStore()
+
+    expect(store.roleTemplateOrder).toEqual(DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => template.id))
+    expect(Object.values(store.roleTemplatesById)).toEqual(DEFAULT_CUSTOM_ROLE_TEMPLATES)
+    await saveStore(store)
+    expect(stored[META_STORE_KEY]).toMatchObject({
+      version: CURRENT_STORE_VERSION,
+      roleTemplateOrder: DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => template.id),
+    })
+  })
+
+  it('does not restore default custom role templates after a current store has removed them', async () => {
+    stored[META_STORE_KEY] = {
+      version: CURRENT_STORE_VERSION,
+      chatOrder: [],
+      roleTemplateOrder: [],
+      roleTemplatesById: {},
+      settings: {
+        defaultMode: 'independent',
+        defaultChatSite: 'gemini',
+      },
+    }
+
+    await expect(loadStore()).resolves.toMatchObject({
+      roleTemplateOrder: [],
+      roleTemplatesById: {},
     })
   })
 

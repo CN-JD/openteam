@@ -1,11 +1,12 @@
 import type { ExternalModelConfig, GroupChat, GroupMessage, GroupRole, MessageHighlight, OpenTeamSettings, OpenTeamStore, OpenTeamViewState, RichNoteDocument, RoleTemplate } from './types'
 import { normalizeMessageHighlightColor } from './highlightColors'
+import { DEFAULT_CUSTOM_ROLE_TEMPLATES } from './defaultCustomRoleTemplates'
 
 export const STORE_KEY = 'openteam.groupStore'
 export const META_STORE_KEY = 'openteam.meta.v2'
 export const CHAT_KEY_PREFIX = 'openteam.chat.'
 export const MESSAGE_CHUNK_KEY_PREFIX = 'openteam.messages.'
-export const CURRENT_STORE_VERSION = 3
+export const CURRENT_STORE_VERSION = 4
 export const MESSAGE_CHUNK_SIZE = 100
 
 interface OpenTeamMetaStore {
@@ -57,8 +58,8 @@ export function createDefaultStore(): OpenTeamStore {
     chatsById: {},
     rolesById: {},
     messagesById: {},
-    roleTemplateOrder: [],
-    roleTemplatesById: {},
+    roleTemplateOrder: defaultCustomRoleTemplateOrder(),
+    roleTemplatesById: defaultCustomRoleTemplatesById(),
     globalNote: undefined,
     chatNotesById: {},
     messageHighlightsById: {},
@@ -116,9 +117,9 @@ function normalizeStore(raw: unknown): OpenTeamStore {
   }
 
   const defaults = createDefaultStore()
-  const version = typeof raw.version === 'number' ? raw.version : defaults.version
+  const storedVersion = typeof raw.version === 'number' ? raw.version : 0
   const normalized: OpenTeamStore = {
-    version: Math.max(version, CURRENT_STORE_VERSION),
+    version: Math.max(storedVersion, CURRENT_STORE_VERSION),
     chatOrder: readStringArray(raw.chatOrder, defaults.chatOrder),
     chatsById: readRecord(raw.chatsById),
     rolesById: readRecord(raw.rolesById),
@@ -138,6 +139,10 @@ function normalizeStore(raw: unknown): OpenTeamStore {
     normalized.currentChatId = raw.currentChatId
   }
 
+  if (shouldSeedDefaultCustomTemplates(storedVersion, normalized)) {
+    seedDefaultCustomTemplates(normalized)
+  }
+
   return normalized
 }
 
@@ -153,6 +158,7 @@ async function loadV2Store(rawMeta: unknown): Promise<OpenTeamStore> {
   const chunkResult = chunkKeys.length > 0 ? await chrome.storage.local.get(chunkKeys) : {}
 
   const store = createDefaultStore()
+  store.version = meta.version
   store.currentChatId = meta.currentChatId
   store.chatOrder = chatDocuments.map(document => document.chat.id)
   store.roleTemplateOrder = [...meta.roleTemplateOrder]
@@ -365,6 +371,23 @@ function normalizeRoleTemplateOrder(rawOrder: unknown, rawTemplates: unknown, fa
   const templates = normalizeRoleTemplateRecord(rawTemplates)
   const ids = new Set(Object.keys(templates))
   return readStringArray(rawOrder, fallback).filter(id => ids.has(id))
+}
+
+function shouldSeedDefaultCustomTemplates(storedVersion: number, store: OpenTeamStore): boolean {
+  return storedVersion < CURRENT_STORE_VERSION && store.roleTemplateOrder.length === 0 && Object.keys(store.roleTemplatesById).length === 0
+}
+
+function seedDefaultCustomTemplates(store: OpenTeamStore): void {
+  store.roleTemplateOrder = defaultCustomRoleTemplateOrder()
+  store.roleTemplatesById = defaultCustomRoleTemplatesById()
+}
+
+function defaultCustomRoleTemplateOrder(): string[] {
+  return DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => template.id)
+}
+
+function defaultCustomRoleTemplatesById(): Record<string, RoleTemplate> {
+  return Object.fromEntries(DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => [template.id, { ...template }]))
 }
 
 function customRoleTemplateOrder(store: OpenTeamStore): string[] {

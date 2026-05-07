@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
+import { DEFAULT_CUSTOM_ROLE_TEMPLATES } from '../group/defaultCustomRoleTemplates'
 import type { GroupChat, GroupRole, OpenTeamStore, RoleTemplate } from '../group/types'
+
+const defaultCustomTemplateIds = DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => template.id)
 
 type RuntimeMessage = { type: string; [key: string]: unknown }
 type MessageSender = chrome.runtime.MessageSender
@@ -180,8 +183,8 @@ describe('background group chat experience handlers', () => {
       chatSite: 'claude',
       systemPrompt: expect.stringContaining('弗兰克尔式意义顾问'),
     })
-    expect(accepted.store.roleTemplateOrder).toEqual([])
-    expect(accepted.store.roleTemplatesById).toEqual({})
+    expect(accepted.store.roleTemplateOrder).toEqual(defaultCustomTemplateIds)
+    expect(accepted.store.roleTemplatesById).toEqual(Object.fromEntries(DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => [template.id, template])))
   })
 
   it('saves rich note documents for global and chat scopes', async () => {

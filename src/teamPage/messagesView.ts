@@ -32,7 +32,7 @@ export interface MessagesViewDependencies {
   setReference(message: GroupMessage): void
   insertTextIntoActiveNote?(text: string): void
   resyncMessageReply(message: GroupMessage): Promise<void>
-  retryRoleReply(role: GroupRole): Promise<void>
+  retryRoleReply(role: GroupRole, messageId?: string): Promise<void>
   stopRoleReply(role: GroupRole): Promise<void>
   runCommand(type: string, payload?: Record<string, unknown>): Promise<void>
   render(): void
@@ -180,6 +180,8 @@ export function createMessagesView(deps: MessagesViewDependencies): MessagesView
       const role = roleForMessage(message)
       if (message.roleId && message.status === 'pending' && role) {
         tools.append(createMessageIconButton('停止回复', 'stop', () => deps.stopRoleReply(role).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))))
+      } else if (message.roleId && role?.modelSource === 'external') {
+        tools.append(createMessageIconButton('重新回复', 'retry', () => deps.retryRoleReply(role, message.id).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))))
       } else if (message.roleId) {
         tools.append(createMessageIconButton('跳转到原始窗口', 'jump', () => deps.focusRoleFrame(message.chatId, message.roleId)))
         tools.append(createMessageIconButton('重新同步完整回复', 'retry', () => handleResyncMessage(message)))

@@ -329,6 +329,8 @@ describe('background message handlers', () => {
 
     const { createMessageHandlers } = await import('./messageHandlers')
     const abort = vi.fn()
+    const getByRole = vi.fn(() => undefined)
+    const sendRoleMessage = vi.fn()
     const routes = createMessageHandlers({
       broadcastStoreUpdated: vi.fn(),
       externalModelClient: { complete: vi.fn() },
@@ -339,9 +341,9 @@ describe('background message handlers', () => {
       runtimeFrames: {
         bind: vi.fn(),
         getByAddress: vi.fn(),
-        getByRole: vi.fn(() => undefined),
+        getByRole,
       },
-      sendRoleMessage: vi.fn(),
+      sendRoleMessage,
       sendError: vi.fn(),
       sendPrompt: vi.fn(),
       externalModelRuns: {
@@ -356,9 +358,117 @@ describe('background message handlers', () => {
 
     expect(response).toMatchObject({ ok: true, messageId: 'msg-1' })
     expect(abort).toHaveBeenCalledWith('chat-1', 'role-1', 'attempt-1')
+    expect(getByRole).not.toHaveBeenCalled()
+    expect(sendRoleMessage).not.toHaveBeenCalled()
     expect(currentStore.rolesById['role-1']).toMatchObject({
       status: 'stopped',
       replyAttemptId: 'stopped-stopped',
     })
+  })
+
+  it('retries external model replies by discarding the selected assistant message and streaming again', async () => {
+    vi.resetModules()
+    const startingStore = createStoreWithReadyRole()
+    startingStore.settings.externalModelOrder = ['model-1']
+    startingStore.settings.externalModelsById = {
+      'model-1': {
+        id: 'model-1',
+        name: 'OpenRouter Claude',
+        format: 'openai',
+        baseUrl: 'https://api.example.test/v1',
+        apiKey: 'sk-test',
+        modelName: 'anthropic/claude-sonnet',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    }
+    startingStore.rolesById['role-1'].modelSource = 'external'
+    startingStore.rolesById['role-1'].externalModelId = 'model-1'
+    startingStore.messagesById['msg-user'] = {
+      id: 'msg-user',
+      chatId: 'chat-1',
+      seq: 1,
+      type: 'user',
+      content: '重新回答这个问题',
+      targetRoleIds: ['role-1'],
+      createdAt: 1,
+      status: 'received',
+      deliveryStatus: { 'role-1': 'received' },
+    }
+    startingStore.messagesById['msg-old-reply'] = {
+      id: 'msg-old-reply',
+      chatId: 'chat-1',
+      seq: 2,
+      type: 'assistant',
+      content: '旧 API 回复',
+      roleId: 'role-1',
+      roleName: '工程师',
+      createdAt: 2,
+      status: 'received',
+    }
+    startingStore.chatsById['chat-1'].messageIds = ['msg-user', 'msg-old-reply']
+    startingStore.chatsById['chat-1'].nextMessageSeq = 3
+
+    let currentStore = structuredClone(startingStore)
+    vi.doMock('./storeAccess', async importOriginal => {
+      const actual = await importOriginal<typeof import('./storeAccess')>()
+      return {
+        ...actual,
+        mutateStore: vi.fn(async (mutator: (store: OpenTeamStore) => unknown) => {
+          const result = await mutator(currentStore)
+          currentStore = structuredClone(currentStore)
+          return { store: currentStore, result }
+        }),
+      }
+    })
+
+    const { createMessageHandlers } = await import('./messageHandlers')
+    let messageIdSeq = 0
+    const externalModelClient = {
+      stream: vi.fn(async function* () {
+        yield '新的 API 回复'
+      }),
+      complete: vi.fn(),
+    }
+    const getByRole = vi.fn(() => undefined)
+    const sendRoleMessage = vi.fn()
+    const routes = createMessageHandlers({
+      broadcastStoreUpdated: vi.fn(),
+      externalModelClient,
+      getChatStatusFromRoles: () => 'ready',
+      log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() },
+      newId: vi.fn((prefix: string) => prefix === 'msg' ? `${prefix}-new-${++messageIdSeq}` : `${prefix}-retry`),
+      now: vi.fn(() => 100),
+      runtimeFrames: {
+        bind: vi.fn(),
+        getByAddress: vi.fn(),
+        getByRole,
+      },
+      sendRoleMessage,
+      sendError: vi.fn(),
+      sendPrompt: vi.fn(),
+    })
+
+    const retryRoute = routes.find(route => route.type === 'GROUP_ROLE_RETRY_REPLY')
+    const response = await retryRoute?.handler({ type: 'GROUP_ROLE_RETRY_REPLY', chatId: 'chat-1', roleId: 'role-1', messageId: 'msg-old-reply' }, {}) as { ok: boolean; store: OpenTeamStore }
+
+    expect(response.ok).toBe(true)
+    expect(response.store.messagesById['msg-old-reply']).toBeUndefined()
+    expect(response.store.chatsById['chat-1'].messageIds).toEqual(['msg-user', 'msg-new-1'])
+    expect(response.store.messagesById['msg-new-1']).toMatchObject({
+      type: 'assistant',
+      roleId: 'role-1',
+      content: '新的 API 回复',
+      status: 'received',
+    })
+    expect(response.store.messagesById['msg-user']).toMatchObject({
+      status: 'received',
+      deliveryStatus: { 'role-1': 'received' },
+    })
+    expect(externalModelClient.stream).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: expect.stringContaining('重新回答这个问题'),
+    }))
+    expect(getByRole).not.toHaveBeenCalled()
+    expect(sendRoleMessage).not.toHaveBeenCalled()
   })
 })

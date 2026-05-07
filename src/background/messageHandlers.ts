@@ -213,23 +213,21 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
     const chatId = requireString(message.chatId, '缺少群聊 ID')
     const roleId = requireString(message.roleId, '缺少人员 ID')
     const timestamp = deps.now()
-    const binding = deps.runtimeFrames.getByRole(chatId, roleId)
-    if (!binding?.ready) throw new Error('人员 iframe 尚未就绪，请先恢复人员')
 
     const { store, result } = await mutateStore(store => {
       const chat = requireChat(store, chatId)
       const role = requireRole(store, chat.id, roleId)
       const requestedMessageId = readOptionalString(message.messageId)
-      const userMessage = resolveRetryUserMessage(store, chat, role, requestedMessageId, deps.log)
+      const retryTarget = resolveRetryTarget(store, chat, role, requestedMessageId, deps.log)
+      const userMessage = retryTarget?.userMessage
       if (!userMessage) throw new Error(requestedMessageId ? '该消息没有发送给这个人员' : '找不到可重试的用户消息')
+      if (retryTarget?.discardMessageId) discardMessage(store, chat, retryTarget.discardMessageId)
 
       const roles = getChatRoles(store, chat)
       const messages = getChatMessages(store, chat)
       const reference = userMessage.references?.[0]
-      const unsyncedContext = buildUnsyncedContext(chat, role, messages, userMessage, store.settings.maxContextChars)
       const roleHistoryCount = countLocalRoleHistory(messages, role, userMessage.id)
       const includesPersona = shouldIncludePersonaForPrompt(roleHistoryCount)
-      const content = buildPrompt({ chat, role, userMessage, roles, unsyncedContext, reference, includePersona: includesPersona })
       const replyAttemptId = deps.newId('attempt')
 
       userMessage.deliveryStatus ??= {}
@@ -242,6 +240,26 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       chat.status = 'running'
       chat.updatedAt = timestamp
 
+      if (isExternalModelRole(role)) {
+        const model = requireExternalModelForRole(store, role)
+        const prompt = buildExternalModelPrompt(store, chat, role, userMessage, roles)
+        if (prompt.memoryPatch) applyExternalMemoryPatch(store, prompt.memoryPatch, timestamp)
+        return {
+          externalDelivery: {
+            roleId,
+            chatId: chat.id,
+            messageId: userMessage.id,
+            replyAttemptId,
+            model,
+            prompt: prompt.content,
+          },
+        }
+      }
+
+      const binding = deps.runtimeFrames.getByRole(chat.id, role.id)
+      if (!binding?.ready) throw new Error('人员 iframe 尚未就绪，请先恢复人员')
+      const unsyncedContext = buildUnsyncedContext(chat, role, messages, userMessage, store.settings.maxContextChars)
+      const content = buildPrompt({ chat, role, userMessage, roles, unsyncedContext, reference, includePersona: includesPersona })
       return {
         delivery: {
           roleId,
@@ -253,22 +271,36 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       }
     })
 
+    await deps.broadcastStoreUpdated(store)
+    const externalDelivery = 'externalDelivery' in result ? result.externalDelivery : undefined
+    if (externalDelivery) {
+      deps.log.info('role-retry-reply:deliver-external', {
+        chatId,
+        roleId,
+        messageId: externalDelivery.messageId,
+        replyAttemptId: externalDelivery.replyAttemptId,
+        modelId: externalDelivery.model.id,
+      })
+      const responseStore = await sendExternalModelDelivery(deps, externalModelClient, externalModelRuns, externalDelivery) ?? store
+      return { ok: true, store: responseStore, messageId: externalDelivery.messageId }
+    }
+    const delivery = 'delivery' in result ? result.delivery : undefined
+    if (!delivery) throw new Error('重试投递生成失败')
     deps.log.info('role-retry-reply:deliver', {
       chatId,
       roleId,
-      messageId: result.delivery.message.messageId,
-      replyAttemptId: result.delivery.message.replyAttemptId,
-      tabId: result.delivery.tabId,
-      frameId: result.delivery.frameId,
+      messageId: delivery.message.messageId,
+      replyAttemptId: delivery.message.replyAttemptId,
+      tabId: delivery.tabId,
+      frameId: delivery.frameId,
     })
-    await deps.broadcastStoreUpdated(store)
     try {
-      await deps.sendPrompt(result.delivery)
+      await deps.sendPrompt(delivery)
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
-      await markDeliveryError(deps, chatId, roleId, result.delivery.message.messageId, reason)
+      await markDeliveryError(deps, chatId, roleId, delivery.message.messageId, reason)
     }
-    return { ok: true, store, messageId: result.delivery.message.messageId }
+    return { ok: true, store, messageId: delivery.message.messageId }
   }
 
   const handleRoleStopReply = async (message: RuntimeMessage) => {
@@ -286,10 +318,10 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       }
     })
 
-    const binding = deps.runtimeFrames.getByRole(chatId, roleId)
     if (active.isExternal) {
       externalModelRuns.abort(chatId, roleId, active.replyAttemptId)
     } else {
+      const binding = deps.runtimeFrames.getByRole(chatId, roleId)
       if (!binding?.ready) throw new Error('人员 iframe 尚未就绪，无法停止回复')
       const response = await deps.sendRoleMessage(binding.tabId, binding.frameId, {
         type: 'TEAM_STOP_GENERATION',
@@ -312,7 +344,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       chat.status = deps.getChatStatusFromRoles(store, chat)
       chat.updatedAt = timestamp
     })
-    deps.log.info('role-stop-reply:stopped', { chatId, roleId, messageId: active.messageId, modelSource: active.isExternal ? 'external' : 'site', tabId: binding?.tabId, frameId: binding?.frameId })
+    deps.log.info('role-stop-reply:stopped', { chatId, roleId, messageId: active.messageId, modelSource: active.isExternal ? 'external' : 'site' })
     await deps.broadcastStoreUpdated(store)
     return { ok: true, store, messageId: active.messageId }
   }
@@ -1114,7 +1146,10 @@ function readPersonaLength(role: GroupRole): number {
   return (role.systemPrompt?.trim() || role.description?.trim() || role.name.trim()).length
 }
 
-function isUserMessageForRole(message: GroupMessage | undefined, chat: GroupChat, role: GroupRole): message is GroupMessage {
+type UserGroupMessage = GroupMessage & { type: 'user' }
+type AssistantGroupMessage = GroupMessage & { type: 'assistant' }
+
+function isUserMessageForRole(message: GroupMessage | undefined, chat: GroupChat, role: GroupRole): message is UserGroupMessage {
   return Boolean(
     message &&
       message.chatId === chat.id &&
@@ -1123,7 +1158,7 @@ function isUserMessageForRole(message: GroupMessage | undefined, chat: GroupChat
   )
 }
 
-function isAssistantMessageForRole(message: GroupMessage | undefined, chat: GroupChat, role: GroupRole): message is GroupMessage {
+function isAssistantMessageForRole(message: GroupMessage | undefined, chat: GroupChat, role: GroupRole): message is AssistantGroupMessage {
   return Boolean(message && message.chatId === chat.id && message.type === 'assistant' && message.roleId === role.id)
 }
 
@@ -1138,6 +1173,51 @@ function findLatestPendingRetryMessage(store: OpenTeamStore, chat: GroupChat, ro
     if (isUserMessageForRole(message, chat, role) && isPendingRetryStatus(message, role)) return message
   }
   return undefined
+}
+
+interface RetryTarget {
+  userMessage: GroupMessage
+  discardMessageId?: string
+}
+
+function resolveRetryTarget(
+  store: OpenTeamStore,
+  chat: GroupChat,
+  role: GroupRole,
+  requestedMessageId: string | undefined,
+  log: MessageHandlersDependencies['log'],
+): RetryTarget | undefined {
+  if (!requestedMessageId) {
+    const userMessage = resolveRetryUserMessage(store, chat, role, undefined, log)
+    return userMessage ? { userMessage } : undefined
+  }
+
+  const requestedMessage = store.messagesById[requestedMessageId]
+  if (isUserMessageForRole(requestedMessage, chat, role)) return { userMessage: requestedMessage }
+
+  if (isExternalModelRole(role) && isAssistantMessageForRole(requestedMessage, chat, role)) {
+    const userMessage = findPromptBeforeAssistant(store, chat, role, requestedMessage.id)
+    return userMessage ? { userMessage, discardMessageId: requestedMessage.id } : undefined
+  }
+
+  return undefined
+}
+
+function findPromptBeforeAssistant(store: OpenTeamStore, chat: GroupChat, role: GroupRole, assistantMessageId: string): GroupMessage | undefined {
+  const assistantIndex = chat.messageIds.indexOf(assistantMessageId)
+  if (assistantIndex <= 0) return undefined
+
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    const message = store.messagesById[chat.messageIds[index]]
+    if (isUserMessageForRole(message, chat, role)) return message
+  }
+  return undefined
+}
+
+function discardMessage(store: OpenTeamStore, chat: GroupChat, messageId: string): void {
+  delete store.messagesById[messageId]
+  chat.messageIds = chat.messageIds.filter(id => id !== messageId)
+  if (store.messageHighlightsById) delete store.messageHighlightsById[messageId]
 }
 
 function resolveRetryUserMessage(

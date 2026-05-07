@@ -33,7 +33,7 @@ export interface RoleRecoveryController {
   reconnectRolesForSend(chat: GroupChat, roles: GroupRole[]): Promise<void>
   refreshCurrentChat(): Promise<void>
   resyncMessageReply(message: GroupMessage): Promise<void>
-  retryRoleReply(role: GroupRole): Promise<void>
+  retryRoleReply(role: GroupRole, messageId?: string): Promise<void>
   stopRoleReply(role: GroupRole): Promise<void>
 }
 
@@ -149,10 +149,10 @@ export function createRoleRecoveryController(deps: RoleRecoveryDependencies): Ro
     await deps.refreshStore(false)
   }
 
-  async function retryRoleReply(role: GroupRole): Promise<void> {
+  async function retryRoleReply(role: GroupRole, messageId = role.lastPromptMessageId): Promise<void> {
     const chat = deps.getStore().chatsById[role.chatId]
     if (!chat) return
-    await deps.runCommand('GROUP_ROLE_RETRY_REPLY', { chatId: chat.id, roleId: role.id, messageId: role.lastPromptMessageId })
+    await deps.runCommand('GROUP_ROLE_RETRY_REPLY', { chatId: chat.id, roleId: role.id, messageId })
     await deps.refreshStore(false)
   }
 

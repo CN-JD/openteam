@@ -5,7 +5,10 @@ import { parseGroupMentions, roleMentionLabel } from './mentionParser'
 import { buildInitPrompt, buildPrompt } from './promptBuilder'
 import { createGroupRole, createGroupRolesBatch, createRoleTemplate, deleteGroupRole, deleteRoleTemplate, getAllRoleTemplates, getRoleTemplateById, updateGroupRole, updateRoleTemplate, validateRoleName } from './roleTemplates'
 import { createDefaultStore } from './store'
+import { DEFAULT_CUSTOM_ROLE_TEMPLATES } from './defaultCustomRoleTemplates'
 import type { GroupChat, GroupMessage, GroupRole } from './types'
+
+const defaultCustomTemplateIds = DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => template.id)
 
 describe('role template utilities', () => {
   it('combines built-in and custom role templates for selection', () => {
@@ -47,7 +50,7 @@ describe('role template utilities', () => {
     expect(store.chatsById['chat-1'].roleIds).toEqual(['role-1'])
 
     expect(() => deleteRoleTemplate(store, 'template-1')).toThrow('该人员库人员已被群聊使用，不能删除')
-    expect(store.roleTemplateOrder).toEqual(['template-1'])
+    expect(store.roleTemplateOrder).toEqual([...defaultCustomTemplateIds, 'template-1'])
     expect(store.rolesById['role-1']).toBe(role)
   })
 
@@ -57,7 +60,7 @@ describe('role template utilities', () => {
 
     deleteRoleTemplate(store, 'template-1')
 
-    expect(store.roleTemplateOrder).toEqual([])
+    expect(store.roleTemplateOrder).toEqual(defaultCustomTemplateIds)
     expect(store.roleTemplatesById['template-1']).toBeUndefined()
   })
 
@@ -130,8 +133,8 @@ describe('role template utilities', () => {
     expect(roles[0]).toMatchObject({ templateId: 'template-1', name: '工程师', systemPrompt: '从工程角度分析', chatSite: 'claude' })
     expect(roles[1]).toMatchObject({ name: '法务', systemPrompt: '从法务角度分析', chatSite: 'gemini' })
     expect(roles[1].templateId).toBeUndefined()
-    expect(store.roleTemplateOrder).toEqual(['template-1'])
-    expect(Object.keys(store.roleTemplatesById)).toEqual(['template-1'])
+    expect(store.roleTemplateOrder).toEqual([...defaultCustomTemplateIds, 'template-1'])
+    expect(Object.keys(store.roleTemplatesById)).toEqual([...defaultCustomTemplateIds, 'template-1'])
   })
 
   it('creates group roles from built-in templates without storing them as custom templates', () => {
@@ -149,8 +152,8 @@ describe('role template utilities', () => {
       chatSite: 'claude',
       systemPrompt: expect.stringContaining('弗兰克尔式意义顾问'),
     })
-    expect(store.roleTemplateOrder).toEqual([])
-    expect(store.roleTemplatesById).toEqual({})
+    expect(store.roleTemplateOrder).toEqual(defaultCustomTemplateIds)
+    expect(store.roleTemplatesById).toEqual(Object.fromEntries(DEFAULT_CUSTOM_ROLE_TEMPLATES.map(template => [template.id, template])))
   })
 
   it('prevents direct built-in template edits and deletes', () => {
@@ -158,6 +161,19 @@ describe('role template utilities', () => {
 
     expect(() => updateRoleTemplate(store, 'builtin-frankl', { name: '意义顾问', systemPrompt: '改写' }, 1)).toThrow('系统内置人员不能编辑')
     expect(() => deleteRoleTemplate(store, 'builtin-frankl')).toThrow('系统内置人员不能删除')
+  })
+
+  it('allows default custom templates to be edited like ordinary custom people', () => {
+    const store = createDefaultStore()
+
+    const updated = updateRoleTemplate(store, defaultCustomTemplateIds[0], { name: '产品参谋', systemPrompt: '从产品角度给建议' }, 1)
+
+    expect(updated).toMatchObject({
+      id: defaultCustomTemplateIds[0],
+      type: 'custom',
+      name: '产品参谋',
+      systemPrompt: '从产品角度给建议',
+    })
   })
 
   it('allows the same library person on different chat sites in one chat', () => {
