@@ -524,7 +524,7 @@ describe('team.html chat creation UI', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/teamPage/chatHeaderView.ts'), 'utf8')
     const uiSource = readFileSync(resolve(process.cwd(), 'src/teamPage/teamUiController.ts'), 'utf8')
 
-    expect(html).toContain('placeholder="输入消息，@成员可指定回复；不 @ 默认发给全部成员。"')
+    expect(html).toContain('placeholder="输入消息，@成员可指定回复；不 @ 仅记录到群聊。"')
     expect(html).toMatch(/\.chat-header\s*{[^}]*min-height:\s*84px;/s)
     expect(html).toMatch(/\.chat-header\s*{[^}]*padding:\s*18px 36px 15px 24px;/s)
     expect(html).toMatch(/\.composer\s*{[^}]*margin:\s*0 22px 18px;/s)
