@@ -17,7 +17,6 @@ export interface TeamUiControllerDependencies {
   togglePeopleDrawerEl: HTMLButtonElement
   rolePanelEl: HTMLElement
   iframeHost: TeamUiIframeHost
-  refreshCurrentChat(): Promise<void>
   getCurrentChat(): GroupChat | undefined
   getCurrentRoles(): GroupRole[]
   getSelectedLoginSite(): ChatSite
@@ -44,10 +43,6 @@ export interface TeamUiController {
 
 export function createTeamUiController(deps: TeamUiControllerDependencies): TeamUiController {
   function registerUi(): void {
-    requireElement<HTMLButtonElement>('#refresh-store').addEventListener('click', () => {
-      deps.refreshCurrentChat().catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
-    })
-
     deps.quickCreateChatEl.addEventListener('click', () => {
       setChatCreatePopoverVisible(deps.createChatFormEl.hidden)
     })

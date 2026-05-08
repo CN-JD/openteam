@@ -36,42 +36,28 @@
         <div class="rail-actions">
           <button class="rail-btn active" type="button" aria-label="群聊" data-tooltip="群聊">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-              <path d="M4.5 6.2h15" />
-              <path d="M4.5 12h11.8" />
-              <path d="M4.5 17.8h7.4" />
-              <path d="M16.4 14.6h2.8v2.8" />
-              <path d="m15.2 18.8 4-4" />
+              <path d="M6.5 7.2A6.4 6.4 0 0 1 12 4.8c4 0 7.2 2.6 7.2 5.8s-3.2 5.8-7.2 5.8c-.7 0-1.4-.08-2.1-.25L5.2 18.7l1.15-4.05A5.3 5.3 0 0 1 4.8 10.6c0-1.25.62-2.42 1.7-3.4Z" />
             </svg>
           </button>
           <button id="open-all-notes" class="rail-btn" type="button" aria-label="查看全部笔记" data-tooltip="全部笔记">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-              <path d="M7 4.5h8.7L19 7.8v11.7H7z" />
-              <path d="M15.5 4.8v3.4h3.2" />
-              <path d="M10 11.2h5.6" />
-              <path d="M10 14.4h5.6" />
-              <path d="M10 17.6h3.2" />
-              <path d="M4.8 7.2v12.4" />
+              <rect x="5" y="5" width="5" height="5" rx="1" />
+              <rect x="14" y="5" width="5" height="5" rx="1" />
+              <rect x="5" y="14" width="5" height="5" rx="1" />
+              <rect x="14" y="14" width="5" height="5" rx="1" />
             </svg>
           </button>
           <button id="open-people-library" class="rail-btn" type="button" aria-label="打开人员库" data-tooltip="人员库">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-              <path d="M8.4 11.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" />
-              <path d="M3.5 19.2c.5-3.1 2.3-5 4.9-5s4.4 1.9 4.9 5" />
-              <path d="M16.3 10.8a2.7 2.7 0 1 0 0-5.4" />
-              <path d="M14.7 14.5c2.2.2 3.8 1.8 4.3 4.7" />
+              <path d="M12 12.2a3.4 3.4 0 1 0 0-6.8 3.4 3.4 0 0 0 0 6.8Z" />
+              <path d="M5.7 19.2c.65-3.3 2.82-5.15 6.3-5.15s5.65 1.85 6.3 5.15" />
             </svg>
           </button>
           <button id="open-external-models" class="rail-btn" type="button" aria-label="添加大模型" data-tooltip="添加大模型">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-              <path d="M12 3.8v4.1" />
-              <path d="M12 16.1v4.1" />
-              <path d="M3.8 12h4.1" />
-              <path d="M16.1 12h4.1" />
-              <path d="m6.2 6.2 2.9 2.9" />
-              <path d="m14.9 14.9 2.9 2.9" />
-              <path d="m17.8 6.2-2.9 2.9" />
-              <path d="m9.1 14.9-2.9 2.9" />
-              <circle cx="12" cy="12" r="3.2" />
+              <path d="m12 4.5 6.2 3.55v7.1L12 18.7l-6.2-3.55v-7.1L12 4.5Z" />
+              <path d="m5.95 8.25 6.05 3.45 6.05-3.45" />
+              <path d="M12 11.7v6.8" />
             </svg>
           </button>
         </div>
@@ -84,19 +70,17 @@
         <div class="panel-header">
           <div class="brand-mark">
             <div class="logo-dot" aria-hidden="true"></div>
-            <div>
-              <h1>OpenTeam</h1>
+            <div class="sidebar-brand-copy">
+              <div class="sidebar-brand-line">
+                <h1>OpenTeam</h1>
+                <span class="sidebar-section-label">群聊</span>
+              </div>
+              <p id="store-summary" class="tiny">加载群聊中</p>
             </div>
           </div>
-          <button id="refresh-store" class="icon-btn" type="button" aria-label="同步并恢复当前群聊" title="同步并恢复当前群聊">↻</button>
-        </div>
-
-        <div class="sidebar-titlebar">
-          <div>
-            <h2>群聊</h2>
-            <p id="store-summary" class="tiny">加载群聊中</p>
+          <div class="sidebar-header-actions">
+            <button id="quick-create-chat" class="icon-btn" type="button" aria-label="新建群聊" aria-controls="chat-create-popover" aria-expanded="false">＋</button>
           </div>
-          <button id="quick-create-chat" class="icon-btn" type="button" aria-label="新建群聊" aria-controls="chat-create-popover" aria-expanded="false">＋</button>
         </div>
 
         <form id="create-chat-form" class="chat-create" hidden>

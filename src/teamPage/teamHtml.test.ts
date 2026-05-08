@@ -152,6 +152,8 @@ describe('team.html chat creation UI', () => {
     expect(railActions).not.toContain('>模</button>')
     expect(settingsMenu).not.toContain('id="open-people-library"')
     expect(settingsMenu).not.toContain('id="open-external-models"')
+    expect(html).toMatch(/\.rail\s*{[^}]*grid-template-rows:\s*74px 1fr auto;/s)
+    expect(html).toMatch(/\.rail-actions\s*{[^}]*padding-top:\s*0;/s)
     expect(html).toMatch(/\.rail-btn\[data-tooltip\]::after\s*{[^}]*content:\s*attr\(data-tooltip\);/s)
     expect(html).toMatch(/\.rail-btn\[data-tooltip\]:hover::after,\s*\.rail-btn\[data-tooltip\]:focus-visible::after\s*{[^}]*opacity:\s*1;/s)
   })
@@ -164,10 +166,12 @@ describe('team.html chat creation UI', () => {
     expect(html).toContain('class="icon-btn window-dot window-dot-close"')
     expect(html).toContain('class="icon-btn window-dot window-dot-minimize"')
     expect(html).toContain('class="icon-btn window-dot window-dot-fullscreen"')
-    expect(toolbarRule).toContain('right: 12px;')
-    expect(toolbarRule).not.toContain('left: 12px;')
-    expect(fullscreenToolbarRule).toContain('right: 14px;')
-    expect(fullscreenToolbarRule).not.toContain('left: 14px;')
+    expect(toolbarRule).toContain('left: 18px;')
+    expect(toolbarRule).toContain('right: auto;')
+    expect(toolbarRule).toContain('z-index: 12;')
+    expect(fullscreenToolbarRule).toContain('left: 18px;')
+    expect(fullscreenToolbarRule).toContain('right: auto;')
+    expect(html).toMatch(/\.floating-toolbar \.icon-btn\s*{[^}]*width:\s*11px;[^}]*height:\s*11px;/s)
     expect(html).toMatch(/\.floating-toolbar \.icon-btn\.window-dot-close\s*{[^}]*background:\s*#ff5f57;/s)
     expect(html).toMatch(/\.floating-toolbar \.icon-btn\.window-dot-minimize\s*{[^}]*background:\s*#febc2e;/s)
     expect(html).toMatch(/\.floating-toolbar \.icon-btn\.window-dot-fullscreen\s*{[^}]*background:\s*#28c840;/s)
@@ -292,13 +296,13 @@ describe('team.html chat creation UI', () => {
     expect(domRefsSource).toContain("'#add-person-tab-custom'")
   })
 
-  it('uses a clean page background without decorative side panels', () => {
+  it('uses a deep desktop-style page background without decorative side panels', () => {
     const html = readTeamDocument()
 
     expect(html).not.toContain('body::before')
     expect(html).not.toContain('body::after')
-    expect(html).toContain('--bg: #000000;')
-    expect(html).toMatch(/body\s*{[^}]*background:\s*var\(--bg\);/s)
+    expect(html).toContain('--bg: #090d13;')
+    expect(html).toMatch(/body\s*{[^}]*background:\s*[\s\S]*linear-gradient\(180deg,\s*#252a32,\s*#151a21 34%,\s*#090d13\);/s)
   })
 
   it('styles iframe background groups with chat and role labels', () => {
@@ -497,16 +501,15 @@ describe('team.html chat creation UI', () => {
     expect(html).not.toMatch(/\.mention-panel\s*{[^}]*right:\s*78px;/s)
   })
 
-  it('makes the refresh control sync and recover the current chat', () => {
+  it('keeps the sidebar header focused on chat creation instead of a refresh control', () => {
     const html = readTeamDocument()
-    const source = readFileSync(resolve(process.cwd(), 'src/teamPage/roleRecoveryController.ts'), 'utf8')
     const uiSource = readFileSync(resolve(process.cwd(), 'src/teamPage/teamUiController.ts'), 'utf8')
 
-    expect(html).toContain('aria-label="同步并恢复当前群聊"')
-    expect(html).toContain('title="同步并恢复当前群聊"')
-    expect(source).toContain('async function refreshCurrentChat()')
-    expect(source).toContain("log.info('ui:refresh-recover-chat'")
-    expect(uiSource).toContain('refreshCurrentChat().catch')
+    expect(html).not.toContain('id="refresh-store"')
+    expect(html).not.toContain('aria-label="同步并恢复当前群聊"')
+    expect(html).toContain('id="quick-create-chat"')
+    expect(uiSource).not.toContain('#refresh-store')
+    expect(uiSource).not.toContain('refreshCurrentChat().catch')
   })
 
   it('asks for confirmation before closing the OpenTeam window', () => {
@@ -516,14 +519,14 @@ describe('team.html chat creation UI', () => {
     expect(source).toContain('window.close()')
   })
 
-  it('uses a lighter composer and simplified chat header', () => {
+  it('uses a refined composer and desktop-style chat header', () => {
     const html = readTeamDocument()
     const source = readFileSync(resolve(process.cwd(), 'src/teamPage/chatHeaderView.ts'), 'utf8')
     const uiSource = readFileSync(resolve(process.cwd(), 'src/teamPage/teamUiController.ts'), 'utf8')
 
     expect(html).toContain('placeholder="输入消息，@成员可指定回复；不 @ 默认发给全部成员。"')
-    expect(html).toMatch(/\.chat-header\s*{[^}]*min-height:\s*72px;/s)
-    expect(html).toMatch(/\.chat-header\s*{[^}]*padding:\s*16px 132px 14px 22px;/s)
+    expect(html).toMatch(/\.chat-header\s*{[^}]*min-height:\s*84px;/s)
+    expect(html).toMatch(/\.chat-header\s*{[^}]*padding:\s*18px 36px 15px 24px;/s)
     expect(html).toMatch(/\.composer\s*{[^}]*margin:\s*0 22px 18px;/s)
     expect(html).toMatch(/\.composer\s*{[^}]*border:\s*1px solid rgba\(132,\s*153,\s*171,\s*0\.22\);/s)
     expect(html).toMatch(/\.drawer-summary\s*{[^}]*min-height:\s*30px;/s)
@@ -604,7 +607,9 @@ describe('team.html chat creation UI', () => {
     expect(source).toContain("time.className = 'chat-time'")
     expect(source).toContain("time.textContent = formatChatListTime(chat.updatedAt)")
     expect(source).not.toContain("textNode(`${chat.roleIds.length} 人员 · ${formatTime(chat.updatedAt)}`)")
-    expect(html).toMatch(/\.chat-item\s*{[^}]*grid-template-columns:\s*44px minmax\(0, 1fr\) auto;/s)
+    expect(html).toMatch(/\.chat-list\s*{[^}]*--chat-list-row-height:\s*70px;/s)
+    expect(html).toMatch(/\.chat-list\s*{[^}]*gap:\s*5px;/s)
+    expect(html).toMatch(/\.chat-item\s*{[^}]*grid-template-columns:\s*40px minmax\(0, 1fr\) auto;/s)
     expect(html).toContain('.chat-avatar')
     expect(html).toContain('.chat-time')
     expect(html).toMatch(/\.chat-time\s*{[^}]*font-size:\s*10px;/s)

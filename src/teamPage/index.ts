@@ -164,7 +164,6 @@ const roleRecoveryController = createRoleRecoveryController({
   showError,
   log,
 })
-const refreshCurrentChat = roleRecoveryController.refreshCurrentChat
 const notifyRoleReadyWaiters = roleRecoveryController.notifyRoleReadyWaiters
 const reconnectRolesForSend = roleRecoveryController.reconnectRolesForSend
 const focusRoleFrame = roleRecoveryController.focusRoleFrame
@@ -345,7 +344,6 @@ const teamUiController = createTeamUiController({
   togglePeopleDrawerEl,
   rolePanelEl,
   iframeHost,
-  refreshCurrentChat,
   getCurrentChat,
   getCurrentRoles,
   getSelectedLoginSite: () => store.rolesById[appState.selectedRoleId ?? '']?.chatSite ?? store.settings.defaultChatSite,
