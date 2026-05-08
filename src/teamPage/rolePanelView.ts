@@ -21,6 +21,8 @@ export interface RolePanelViewDependencies {
   roleToneClass(seed: string | undefined): string
   roleAvatarLabel(name: string | undefined): string
   insertMention(role: GroupRole): void
+  refreshCurrentChat(): Promise<void>
+  focusRoleFrame(chatId: string, roleId: string | undefined): void
   runCommand(type: string, payload?: Record<string, unknown>): Promise<void>
   showError(message: string): void
 }
@@ -36,6 +38,7 @@ export function createRolePanelView(deps: RolePanelViewDependencies): RolePanelV
     const selectedRole = deps.state.selectedRoleId ? store.rolesById[deps.state.selectedRoleId] : undefined
     deps.rolePanelEl.classList.toggle('open', deps.state.peopleDrawerOpen)
     deps.roleSummaryEl.textContent = `${roles.length} 人员${selectedRole ? ` · 当前：${selectedRole.name}` : ''}`
+    renderRolePanelActions()
     deps.roleListEl.replaceChildren()
 
     if (!deps.getCurrentChat()) {
@@ -82,6 +85,10 @@ export function createRolePanelView(deps: RolePanelViewDependencies): RolePanelV
     meta.append(roleSiteControl(role), roleContextProgress(role), roleConnectionStatus(role))
     main.append(row, description, meta)
 
+    const actions = document.createElement('div')
+    actions.className = 'role-card-actions'
+    const refresh = roleRefreshButton(role)
+    const jump = roleJumpButton(role)
     const more = document.createElement('button')
     more.type = 'button'
     more.className = 'role-more'
@@ -93,7 +100,8 @@ export function createRolePanelView(deps: RolePanelViewDependencies): RolePanelV
       deps.state.roleActionMenuRoleId = deps.state.roleActionMenuRoleId === role.id ? undefined : role.id
       renderRolePanel()
     })
-    card.append(avatar, main, more)
+    actions.append(refresh, jump, more)
+    card.append(avatar, main, actions)
     if (deps.state.roleActionMenuRoleId === role.id) card.append(roleActionMenu(role))
 
     if (role.status === 'error') {
@@ -103,6 +111,56 @@ export function createRolePanelView(deps: RolePanelViewDependencies): RolePanelV
       main.append(error)
     }
     return card
+  }
+
+  function renderRolePanelActions(): void {
+    const header = deps.roleSummaryEl.parentElement?.parentElement
+    if (!header) return
+    let actions = header.querySelector<HTMLElement>('.role-panel-actions')
+    if (!actions) {
+      actions = document.createElement('div')
+      actions.className = 'role-panel-actions'
+      const login = header.querySelector('#open-gemini-login')
+      if (login) {
+        header.insertBefore(actions, login)
+        actions.append(login)
+      } else {
+        header.append(actions)
+      }
+    }
+  }
+
+  function roleRefreshButton(role: GroupRole): HTMLButtonElement {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'role-refresh'
+    button.dataset.roleRefresh = role.id
+    button.setAttribute('aria-label', `刷新 ${role.name} 的成员窗口`)
+    button.title = role.modelSource === 'external' ? 'API 成员无需刷新窗口' : '刷新成员窗口'
+    button.textContent = '↻'
+    if (role.modelSource === 'external') button.disabled = true
+    button.addEventListener('click', event => {
+      event.stopPropagation()
+      if (role.modelSource === 'external') return
+      deps.iframeHost.recoverRole(role)
+      deps.runCommand('GROUP_ROLE_RECOVER', { chatId: role.chatId, roleId: role.id })
+        .catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
+    })
+    return button
+  }
+
+  function roleJumpButton(role: GroupRole): HTMLButtonElement {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'role-jump'
+    button.setAttribute('aria-label', `跳转到 ${role.name} 的原始窗口`)
+    button.title = '跳转到原始窗口'
+    button.textContent = '↗'
+    button.addEventListener('click', event => {
+      event.stopPropagation()
+      deps.focusRoleFrame(role.chatId, role.id)
+    })
+    return button
   }
 
   function roleSiteControl(role: GroupRole): HTMLElement {

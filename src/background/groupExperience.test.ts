@@ -462,25 +462,32 @@ describe('background group chat experience handlers', () => {
   })
 
   it('marks delivery error when a prompt response is explicitly rejected', async () => {
-    const store = makeStore()
-    store.currentChatId = 'chat-1'
-    store.chatsById['chat-1'] = makeChat('chat-1', ['role-1'])
-    store.chatOrder = ['chat-1']
-    store.rolesById['role-1'] = makeRole('chat-1', 'role-1', '工程师')
-    const harness = await setupBackground(store)
-    harness.tabsSendMessage.mockImplementation((_tabId, message) => Promise.resolve(
-      message?.type === 'TEAM_SEND_PROMPT' ? { ok: false, error: 'Gemini 输入框不可用' } : { ok: true },
-    ))
+    vi.useFakeTimers()
+    try {
+      const store = makeStore()
+      store.currentChatId = 'chat-1'
+      store.chatsById['chat-1'] = makeChat('chat-1', ['role-1'])
+      store.chatOrder = ['chat-1']
+      store.rolesById['role-1'] = makeRole('chat-1', 'role-1', '工程师')
+      const harness = await setupBackground(store)
+      harness.tabsSendMessage.mockImplementation((_tabId, message) => Promise.resolve(
+        message?.type === 'TEAM_SEND_PROMPT' ? { ok: false, error: 'Gemini 输入框不可用' } : { ok: true },
+      ))
 
-    await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'role-1', hostTabId: 900 }, { tab: { id: 101 } as chrome.tabs.Tab, frameId: 7, url: 'https://gemini.google.com/app/test' })
-    const response = await harness.invoke({ type: 'GROUP_MESSAGE_SEND', chatId: 'chat-1', raw: '@all 请评估这个方案' }) as { ok: boolean; message: { id: string } }
+      await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'role-1', hostTabId: 900 }, { tab: { id: 101 } as chrome.tabs.Tab, frameId: 7, url: 'https://gemini.google.com/app/test' })
+      const responsePromise = harness.invoke({ type: 'GROUP_MESSAGE_SEND', chatId: 'chat-1', raw: '@all 请评估这个方案' }) as Promise<{ ok: boolean; message: { id: string } }>
+      await vi.advanceTimersByTimeAsync(31_000)
+      const response = await responsePromise
 
-    expect(response.ok).toBe(true)
-    const stored = await harness.getStore()
-    expect(stored.messagesById[response.message.id].status).toBe('error')
-    expect(stored.messagesById[response.message.id].deliveryStatus?.['role-1']).toBe('error')
-    expect(stored.rolesById['role-1'].status).toBe('error')
-    expect(stored.chatsById['chat-1'].status).toBe('error')
+      expect(response.ok).toBe(true)
+      const stored = await harness.getStore()
+      expect(stored.messagesById[response.message.id].status).toBe('error')
+      expect(stored.messagesById[response.message.id].deliveryStatus?.['role-1']).toBe('error')
+      expect(stored.rolesById['role-1'].status).toBe('error')
+      expect(stored.chatsById['chat-1'].status).toBe('error')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('still sends to available people when another targeted person is unavailable', async () => {

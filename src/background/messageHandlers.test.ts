@@ -185,6 +185,270 @@ describe('background message handlers', () => {
     }))
   })
 
+  it('retries transient site prompt delivery failures before marking the role failed', async () => {
+    vi.resetModules()
+    let currentStore = createStoreWithReadyRole()
+    vi.doMock('./storeAccess', async importOriginal => {
+      const actual = await importOriginal<typeof import('./storeAccess')>()
+      return {
+        ...actual,
+        mutateStore: vi.fn(async (mutator: (store: OpenTeamStore) => unknown) => {
+          const result = await mutator(currentStore)
+          currentStore = structuredClone(currentStore)
+          return { store: currentStore, result }
+        }),
+      }
+    })
+
+    const { createMessageHandlers } = await import('./messageHandlers')
+    const binding: RuntimeFrameBinding = { chatId: 'chat-1', roleId: 'role-1', tabId: 101, frameId: 7, ready: true, lastSeenAt: 0 }
+    const sendPrompt = vi.fn(async () => {
+      if (sendPrompt.mock.calls.length < 3) throw new Error('编辑框暂不可用')
+    })
+    const sendError = vi.fn()
+    const routes = createMessageHandlers({
+      broadcastStoreUpdated: vi.fn(),
+      deliveryRetryDelaysMs: [0, 0],
+      getChatStatusFromRoles: () => 'running',
+      log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() },
+      newId: vi.fn((prefix: string) => `${prefix}-1`),
+      now: vi.fn(() => 100),
+      runtimeFrames: {
+        bind: vi.fn(),
+        getByAddress: vi.fn(),
+        getByRole: vi.fn(() => binding),
+      },
+      sendRoleMessage: vi.fn(),
+      sendError,
+      sendPrompt,
+      waitForRetry: vi.fn(async () => undefined),
+    })
+
+    const sendRoute = routes.find(route => route.type === 'GROUP_MESSAGE_SEND')
+    const response = await sendRoute?.handler({ type: 'GROUP_MESSAGE_SEND', chatId: 'chat-1', raw: '@all 继续发送' }, {}) as { ok: boolean }
+
+    expect(response.ok).toBe(true)
+    expect(sendPrompt).toHaveBeenCalledTimes(3)
+    expect(sendError).not.toHaveBeenCalled()
+    expect(currentStore.rolesById['role-1']).toMatchObject({
+      status: 'thinking',
+      lastPromptMessageId: 'msg-1',
+      replyAttemptId: 'attempt-1',
+    })
+    expect(currentStore.messagesById['msg-1']).toMatchObject({
+      status: 'pending',
+      deliveryStatus: { 'role-1': 'pending' },
+    })
+  })
+
+  it('marks a site delivery failed only after retry attempts are exhausted', async () => {
+    vi.resetModules()
+    let currentStore = createStoreWithReadyRole()
+    vi.doMock('./storeAccess', async importOriginal => {
+      const actual = await importOriginal<typeof import('./storeAccess')>()
+      return {
+        ...actual,
+        mutateStore: vi.fn(async (mutator: (store: OpenTeamStore) => unknown) => {
+          const result = await mutator(currentStore)
+          currentStore = structuredClone(currentStore)
+          return { store: currentStore, result }
+        }),
+      }
+    })
+
+    const { createMessageHandlers } = await import('./messageHandlers')
+    const binding: RuntimeFrameBinding = { chatId: 'chat-1', roleId: 'role-1', tabId: 101, frameId: 7, ready: true, lastSeenAt: 0 }
+    const sendPrompt = vi.fn(async () => {
+      throw new Error('发送按钮不可用')
+    })
+    const sendError = vi.fn()
+    const routes = createMessageHandlers({
+      broadcastStoreUpdated: vi.fn(),
+      deliveryRetryDelaysMs: [0, 0],
+      getChatStatusFromRoles: () => 'error',
+      log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() },
+      newId: vi.fn((prefix: string) => `${prefix}-1`),
+      now: vi.fn(() => 100),
+      runtimeFrames: {
+        bind: vi.fn(),
+        getByAddress: vi.fn(),
+        getByRole: vi.fn(() => binding),
+      },
+      sendRoleMessage: vi.fn(),
+      sendError,
+      sendPrompt,
+      waitForRetry: vi.fn(async () => undefined),
+    })
+
+    const sendRoute = routes.find(route => route.type === 'GROUP_MESSAGE_SEND')
+    await sendRoute?.handler({ type: 'GROUP_MESSAGE_SEND', chatId: 'chat-1', raw: '@all 继续发送' }, {})
+
+    expect(sendPrompt).toHaveBeenCalledTimes(3)
+    expect(sendError).toHaveBeenCalledWith('发送按钮不可用')
+    expect(currentStore.rolesById['role-1'].status).toBe('error')
+    expect(currentStore.rolesById['role-1'].lastPromptMessageId).toBeUndefined()
+    expect(currentStore.messagesById['msg-1']).toMatchObject({
+      status: 'error',
+      deliveryStatus: { 'role-1': 'error' },
+    })
+  })
+
+  it('does not block other site roles while one role delivery is still pending', async () => {
+    vi.resetModules()
+    const startingStore = createStoreWithReadyRole()
+    startingStore.chatsById['chat-1'].roleIds = ['role-1', 'role-2']
+    startingStore.rolesById['role-2'] = {
+      ...startingStore.rolesById['role-1'],
+      id: 'role-2',
+      name: '产品经理',
+    }
+    let currentStore = structuredClone(startingStore)
+    vi.doMock('./storeAccess', async importOriginal => {
+      const actual = await importOriginal<typeof import('./storeAccess')>()
+      return {
+        ...actual,
+        mutateStore: vi.fn(async (mutator: (store: OpenTeamStore) => unknown) => {
+          const result = await mutator(currentStore)
+          currentStore = structuredClone(currentStore)
+          return { store: currentStore, result }
+        }),
+      }
+    })
+
+    const { createMessageHandlers } = await import('./messageHandlers')
+    const bindingsByRole: Record<string, RuntimeFrameBinding> = {
+      'role-1': { chatId: 'chat-1', roleId: 'role-1', tabId: 101, frameId: 7, ready: true, lastSeenAt: 0 },
+      'role-2': { chatId: 'chat-1', roleId: 'role-2', tabId: 102, frameId: 8, ready: true, lastSeenAt: 0 },
+    }
+    let releaseRoleOneDelivery!: () => void
+    const roleOneDeliveryPending = new Promise<void>(resolve => {
+      releaseRoleOneDelivery = resolve
+    })
+    const sendPrompt = vi.fn(async delivery => {
+      if (delivery.roleId === 'role-1') await roleOneDeliveryPending
+    })
+    const routes = createMessageHandlers({
+      broadcastStoreUpdated: vi.fn(),
+      deliveryRetryDelaysMs: [100],
+      getChatStatusFromRoles: () => 'running',
+      log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() },
+      newId: vi.fn((prefix: string) => `${prefix}-${prefix === 'attempt' ? sendPrompt.mock.calls.length + 1 : 1}`),
+      now: vi.fn(() => 100),
+      runtimeFrames: {
+        bind: vi.fn(),
+        getByAddress: vi.fn(),
+        getByRole: vi.fn((_chatId: string, roleId: string) => bindingsByRole[roleId]),
+      },
+      sendRoleMessage: vi.fn(),
+      sendError: vi.fn(),
+      sendPrompt,
+      waitForRetry: vi.fn(async () => undefined),
+    })
+
+    const sendRoute = routes.find(route => route.type === 'GROUP_MESSAGE_SEND')
+    const responsePromise = sendRoute?.handler({ type: 'GROUP_MESSAGE_SEND', chatId: 'chat-1', raw: '@all 继续发送' }, {}) as Promise<{ ok: boolean }>
+    for (let index = 0; index < 10; index += 1) {
+      if (sendPrompt.mock.calls.some(call => call[0].roleId === 'role-2')) break
+      await Promise.resolve()
+    }
+
+    expect(sendPrompt.mock.calls.some(call => call[0].roleId === 'role-2')).toBe(true)
+    releaseRoleOneDelivery()
+    const response = await responsePromise
+
+    expect(response.ok).toBe(true)
+    expect(sendPrompt.mock.calls.map(call => call[0].roleId)).toEqual(['role-1', 'role-2'])
+  })
+
+  it('retries an active site prompt after a runtime timeout before marking the role failed', async () => {
+    vi.resetModules()
+    const startingStore = createStoreWithReadyRole()
+    startingStore.chatsById['chat-1'].messageIds = ['msg-1']
+    startingStore.chatsById['chat-1'].nextMessageSeq = 2
+    startingStore.chatsById['chat-1'].status = 'running'
+    startingStore.messagesById['msg-1'] = {
+      id: 'msg-1',
+      chatId: 'chat-1',
+      seq: 1,
+      type: 'user',
+      content: '请分析',
+      targetRoleIds: ['role-1'],
+      createdAt: 1,
+      status: 'sent',
+      deliveryStatus: { 'role-1': 'sent' },
+    }
+    startingStore.rolesById['role-1'].status = 'thinking'
+    startingStore.rolesById['role-1'].lastPromptMessageId = 'msg-1'
+    startingStore.rolesById['role-1'].replyAttemptId = 'attempt-old'
+
+    let currentStore = structuredClone(startingStore)
+    vi.doMock('./storeAccess', async importOriginal => {
+      const actual = await importOriginal<typeof import('./storeAccess')>()
+      return {
+        ...actual,
+        mutateStore: vi.fn(async (mutator: (store: OpenTeamStore) => unknown) => {
+          const result = await mutator(currentStore)
+          currentStore = structuredClone(currentStore)
+          return { store: currentStore, result }
+        }),
+      }
+    })
+
+    const { createMessageHandlers } = await import('./messageHandlers')
+    const binding: RuntimeFrameBinding = { chatId: 'chat-1', roleId: 'role-1', tabId: 101, frameId: 7, ready: true, lastSeenAt: 0 }
+    const sendPrompt = vi.fn()
+    const sendError = vi.fn()
+    const routes = createMessageHandlers({
+      broadcastStoreUpdated: vi.fn(),
+      deliveryRetryDelaysMs: [],
+      getChatStatusFromRoles: () => 'running',
+      log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() },
+      newId: vi.fn((prefix: string) => prefix === 'attempt' ? 'attempt-retry' : `${prefix}-1`),
+      now: vi.fn(() => 200),
+      roleErrorRetryDelaysMs: [0],
+      runtimeFrames: {
+        bind: vi.fn(),
+        getByAddress: vi.fn(),
+        getByRole: vi.fn(() => binding),
+      },
+      sendRoleMessage: vi.fn(),
+      sendError,
+      sendPrompt,
+      waitForRetry: vi.fn(async () => undefined),
+    })
+
+    const errorRoute = routes.find(route => route.type === 'TEAM_ROLE_ERROR')
+    const response = await errorRoute?.handler({
+      type: 'TEAM_ROLE_ERROR',
+      chatId: 'chat-1',
+      roleId: 'role-1',
+      messageId: 'msg-1',
+      replyAttemptId: 'attempt-old',
+      reason: '等待 chatgpt 回复超时（120 秒）',
+    }, {}) as { ok: boolean; store: OpenTeamStore }
+
+    expect(response.ok).toBe(true)
+    expect(sendPrompt).toHaveBeenCalledTimes(1)
+    expect(sendPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      roleId: 'role-1',
+      message: expect.objectContaining({
+        messageId: 'msg-1',
+        replyAttemptId: 'attempt-retry',
+        content: expect.stringContaining('请分析'),
+      }),
+    }))
+    expect(sendError).not.toHaveBeenCalled()
+    expect(currentStore.rolesById['role-1']).toMatchObject({
+      status: 'thinking',
+      lastPromptMessageId: 'msg-1',
+      replyAttemptId: 'attempt-retry',
+    })
+    expect(currentStore.messagesById['msg-1']).toMatchObject({
+      status: 'pending',
+      deliveryStatus: { 'role-1': 'pending' },
+    })
+  })
+
   it('delivers external model roles through the API runtime without requiring an iframe', async () => {
     vi.resetModules()
     const startingStore = createStoreWithReadyRole()
@@ -351,6 +615,82 @@ describe('background message handlers', () => {
       status: 'received',
     })
     expect(response?.store.rolesById['role-1']).toMatchObject({ status: 'ready' })
+  })
+
+  it('retries external model failures before content starts and keeps one assistant placeholder', async () => {
+    vi.resetModules()
+    const startingStore = createStoreWithReadyRole()
+    startingStore.settings.externalModelOrder = ['model-1']
+    startingStore.settings.externalModelsById = {
+      'model-1': {
+        id: 'model-1',
+        name: 'API 模型',
+        format: 'openai',
+        baseUrl: 'https://api.example.test/v1',
+        apiKey: 'sk-test',
+        modelName: 'qwen-plus',
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    }
+    startingStore.rolesById['role-1'].modelSource = 'external'
+    startingStore.rolesById['role-1'].externalModelId = 'model-1'
+
+    let currentStore = structuredClone(startingStore)
+    vi.doMock('./storeAccess', async importOriginal => {
+      const actual = await importOriginal<typeof import('./storeAccess')>()
+      return {
+        ...actual,
+        mutateStore: vi.fn(async (mutator: (store: OpenTeamStore) => unknown) => {
+          const result = await mutator(currentStore)
+          currentStore = structuredClone(currentStore)
+          return { store: currentStore, result }
+        }),
+      }
+    })
+
+    const { createMessageHandlers } = await import('./messageHandlers')
+    const externalModelClient = {
+      complete: vi.fn(async () => {
+        if (externalModelClient.complete.mock.calls.length === 1) throw new Error('网络暂时不可用')
+        return { content: '重试后的 API 回复' }
+      }),
+    }
+    let messageIdSeq = 0
+    const routes = createMessageHandlers({
+      broadcastStoreUpdated: vi.fn(),
+      externalModelClient,
+      externalModelRetryDelaysMs: [0],
+      getChatStatusFromRoles: () => 'ready',
+      log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() },
+      newId: vi.fn((prefix: string) => prefix === 'msg' ? `${prefix}-${++messageIdSeq}` : `${prefix}-1`),
+      now: vi.fn(() => 100),
+      runtimeFrames: {
+        bind: vi.fn(),
+        getByAddress: vi.fn(),
+        getByRole: vi.fn(() => undefined),
+      },
+      sendRoleMessage: vi.fn(),
+      sendError: vi.fn(),
+      sendPrompt: vi.fn(),
+      waitForRetry: vi.fn(async () => undefined),
+    })
+
+    const sendRoute = routes.find(route => route.type === 'GROUP_MESSAGE_SEND')
+    const response = await sendRoute?.handler({ type: 'GROUP_MESSAGE_SEND', chatId: 'chat-1', raw: '@all 用 API 回答' }, {}) as { store: OpenTeamStore }
+
+    expect(externalModelClient.complete).toHaveBeenCalledTimes(2)
+    expect(response.store.chatsById['chat-1'].messageIds).toEqual(['msg-1', 'msg-2'])
+    expect(response.store.messagesById['msg-2']).toMatchObject({
+      type: 'assistant',
+      content: '重试后的 API 回复',
+      status: 'received',
+      roleId: 'role-1',
+    })
+    expect(response.store.messagesById['msg-1']).toMatchObject({
+      status: 'received',
+      deliveryStatus: { 'role-1': 'received' },
+    })
   })
 
   it('stops an active external model stream without requiring an iframe', async () => {

@@ -1,6 +1,12 @@
+// @vitest-environment jsdom
+
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createDefaultStore } from '../group/store'
+import type { GroupChat, GroupRole, OpenTeamStore } from '../group/types'
+import { createTeamPageState } from './appState'
+import { createRolePanelView } from './rolePanelView'
 
 describe('team page role panel view boundary', () => {
   it('keeps role panel rendering and role site switching outside the entrypoint', () => {
@@ -14,6 +20,12 @@ describe('team page role panel view boundary', () => {
     expect(viewSource).toContain('function roleActionMenu(role: GroupRole): HTMLElement')
     expect(viewSource).toContain('function kickRoleFromChat(role: GroupRole): Promise<void>')
     expect(viewSource).toContain('function switchRoleSite(role: GroupRole, modelKey: string): Promise<void>')
+    expect(viewSource).toContain('function roleRefreshButton(role: GroupRole): HTMLButtonElement')
+    expect(viewSource).toContain('function roleJumpButton(role: GroupRole): HTMLButtonElement')
+    expect(viewSource).not.toContain('function roleListRefreshButton(): HTMLButtonElement')
+    expect(viewSource).toContain("deps.iframeHost.recoverRole(role)")
+    expect(viewSource).toContain("deps.runCommand('GROUP_ROLE_RECOVER'")
+    expect(viewSource).toContain("deps.focusRoleFrame(role.chatId, role.id)")
     expect(viewSource).toContain('deps.state.roleActionMenuRoleId')
     expect(viewSource).toContain("kick.textContent = '删除成员'")
     expect(viewSource).toContain("ready: '在线'")
@@ -34,10 +46,85 @@ describe('team page role panel view boundary', () => {
     expect(entrySource).not.toContain('function roleSiteControl(role: GroupRole): HTMLElement')
     expect(entrySource).not.toContain('function roleSiteMenu(role: GroupRole): HTMLElement')
     expect(entrySource).not.toContain('function roleActionMenu(role: GroupRole): HTMLElement')
+    expect(entrySource).not.toContain('function roleRefreshButton(role: GroupRole): HTMLButtonElement')
+    expect(entrySource).not.toContain('function roleJumpButton(role: GroupRole): HTMLButtonElement')
     expect(entrySource).not.toContain('function kickRoleFromChat(role: GroupRole): Promise<void>')
     expect(entrySource).not.toContain('function switchRoleSite(role: GroupRole, chatSite: ChatSite): Promise<void>')
   })
+
+  it('renders a refresh action on each member card and rebuilds only that iframe', async () => {
+    const store = makeStoreWithRole()
+    const rolePanelEl = document.createElement('aside')
+    const roleSummaryEl = document.createElement('p')
+    const roleListEl = document.createElement('div')
+    const iframeHost = { recoverRole: vi.fn() }
+    const runCommand = vi.fn(async () => undefined)
+    rolePanelEl.append(roleSummaryEl, roleListEl)
+
+    const view = createRolePanelView({
+      state: createTeamPageState(),
+      getStore: () => store,
+      rolePanelEl,
+      roleSummaryEl,
+      roleListEl,
+      iframeHost,
+      getCurrentChat: () => store.chatsById['chat-1'],
+      getCurrentRoles: () => [store.rolesById['role-1']],
+      emptyCard: (title, body) => {
+        const card = document.createElement('div')
+        card.textContent = `${title}${body}`
+        return card
+      },
+      roleToneClass: () => 'role-tone-0',
+      roleAvatarLabel: name => name?.slice(0, 1) ?? '',
+      insertMention: vi.fn(),
+      refreshCurrentChat: vi.fn(async () => undefined),
+      focusRoleFrame: vi.fn(),
+      runCommand,
+      showError: vi.fn(),
+    })
+
+    view.renderRolePanel()
+    expect(roleListEl.querySelector('[data-role-list-refresh]')).toBeNull()
+    const refresh = roleListEl.querySelector<HTMLButtonElement>('[data-role-refresh="role-1"]')
+    expect(refresh?.getAttribute('aria-label')).toBe('刷新 产品经理 的成员窗口')
+    refresh?.click()
+    await Promise.resolve()
+
+    expect(iframeHost.recoverRole).toHaveBeenCalledWith(store.rolesById['role-1'])
+    expect(runCommand).toHaveBeenCalledWith('GROUP_ROLE_RECOVER', { chatId: 'chat-1', roleId: 'role-1' })
+  })
 })
+
+function makeStoreWithRole(): OpenTeamStore {
+  const store = createDefaultStore()
+  const chat: GroupChat = {
+    id: 'chat-1',
+    name: '产品会',
+    mode: 'independent',
+    roleIds: ['role-1'],
+    messageIds: [],
+    nextMessageSeq: 1,
+    status: 'ready',
+    createdAt: 1,
+    updatedAt: 1,
+  }
+  const role: GroupRole = {
+    id: 'role-1',
+    chatId: chat.id,
+    name: '产品经理',
+    status: 'error',
+    contextCursor: 0,
+    chatSite: 'chatgpt',
+    createdAt: 1,
+    updatedAt: 1,
+  }
+  store.currentChatId = chat.id
+  store.chatOrder = [chat.id]
+  store.chatsById[chat.id] = chat
+  store.rolesById[role.id] = role
+  return store
+}
 
 function roleSiteMenuSource(source: string): string {
   const match = source.match(/function roleSiteMenu\(role: GroupRole\): HTMLElement \{(?<body>[\s\S]*?)\n  function roleActionMenu/)

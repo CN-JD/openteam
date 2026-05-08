@@ -15,6 +15,9 @@ import type { RuntimeFrameRegistry } from './runtimeFrames'
 import { getChatMessages, getChatRoles, mutateStore, requireChat, requireRole } from './storeAccess'
 
 const STALE_THINKING_MS = 120_000
+const DEFAULT_DELIVERY_RETRY_DELAYS_MS = [2_000, 2_000, 4_000, 8_000, 15_000] as const
+const DEFAULT_EXTERNAL_MODEL_RETRY_DELAYS_MS = [2_000, 2_000, 4_000, 8_000, 15_000] as const
+const DEFAULT_ROLE_ERROR_RETRY_DELAYS_MS = [2_000, 8_000] as const
 
 interface ExternalPromptDelivery {
   roleId: string
@@ -63,12 +66,17 @@ export interface MessageHandlersDependencies {
   sendPrompt: PromptSender
   externalModelClient?: ExternalModelClient
   externalModelRuns?: ExternalModelRunRegistry
+  deliveryRetryDelaysMs?: readonly number[]
+  externalModelRetryDelaysMs?: readonly number[]
+  roleErrorRetryDelaysMs?: readonly number[]
+  waitForRetry?(ms: number): Promise<void>
 }
 
 export function createMessageHandlers(deps: MessageHandlersDependencies): BackgroundMessageRoute[] {
   const deepSeekPromptBatcher = createDeepSeekPromptBatcher(deps)
   const externalModelClient = deps.externalModelClient ?? createExternalModelClient()
   const externalModelRuns = deps.externalModelRuns ?? createExternalModelRunRegistry()
+  const roleErrorRetryCounts = new Map<string, number>()
 
   const handleMessageSend = async (message: RuntimeMessage) => {
     const chatId = requireString(message.chatId, '缺少群聊 ID')
@@ -321,12 +329,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       tabId: delivery.tabId,
       frameId: delivery.frameId,
     })
-    try {
-      await deps.sendPrompt(delivery)
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      await markDeliveryError(deps, chatId, roleId, delivery.message.messageId, reason)
-    }
+    await sendPromptDelivery(deps, chatId, delivery.message.messageId, delivery)
     return { ok: true, store, messageId: delivery.message.messageId }
   }
 
@@ -560,10 +563,11 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
     const { store, result } = await mutateStore(store => {
       const chat = requireChat(store, identity.chatId)
       const role = requireRole(store, chat.id, identity.roleId)
-      role.status = mappedStatus
+      const keepActivePromptError = mappedStatus === 'error' && Boolean(role.lastPromptMessageId)
+      role.status = keepActivePromptError ? 'thinking' : mappedStatus
       role.updatedAt = timestamp
-      if (mappedStatus === 'ready' || mappedStatus === 'error') delete role.lastPromptMessageId
-      if (mappedStatus === 'ready' || mappedStatus === 'error') delete role.replyAttemptId
+      if (mappedStatus === 'ready' || (mappedStatus === 'error' && !keepActivePromptError)) delete role.lastPromptMessageId
+      if (mappedStatus === 'ready' || (mappedStatus === 'error' && !keepActivePromptError)) delete role.replyAttemptId
       if (mappedStatus === 'stopped') role.replyAttemptId = deps.newId('stopped')
       chat.status = deps.getChatStatusFromRoles(store, chat)
       chat.updatedAt = timestamp
@@ -635,6 +639,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
 
     deps.log.info('role-reply:stored', { chatId: result.reply.chatId, roleId: result.reply.roleId, replyMessageId: result.reply.id })
     await deps.broadcastStoreUpdated(store)
+    if (promptMessageId) clearRoleErrorRetryCount(roleErrorRetryCounts, identity.chatId, identity.roleId, promptMessageId)
     if (promptMessageId) await deepSeekPromptBatcher.complete(identity.chatId, promptMessageId, identity.roleId)
     return { ok: true, message: result.reply, store }
   }
@@ -673,6 +678,28 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
     const replyAttemptId = readOptionalString(message.replyAttemptId)
     deps.log.warn('role-error:received', { ...identity, promptMessageId, replyAttemptId, reason, senderUrl: sender.url, tabId: messageTabId(message, sender), frameId: senderFrameId(sender) })
 
+    const retry = promptMessageId
+      ? await prepareRoleErrorRetry(deps, roleErrorRetryCounts, identity.chatId, identity.roleId, promptMessageId, replyAttemptId, reason)
+      : undefined
+    if (retry) {
+      await deps.broadcastStoreUpdated(retry.store)
+      deps.log.warn('role-error:retry-scheduled', {
+        chatId: identity.chatId,
+        roleId: identity.roleId,
+        messageId: promptMessageId,
+        retryCount: retry.retryCount,
+        delayMs: retry.delayMs,
+        reason,
+      })
+      await waitForRetryDelay(deps, retry.delayMs)
+      if (retry.externalDelivery) {
+        const responseStore = await sendExternalModelDelivery(deps, externalModelClient, externalModelRuns, retry.externalDelivery) ?? retry.store
+        return { ok: true, retried: true, store: responseStore }
+      }
+      await sendPromptDelivery(deps, identity.chatId, promptMessageId, retry.delivery)
+      return { ok: true, retried: true, store: retry.store }
+    }
+
     const { store } = await mutateStore(store => {
       const chat = requireChat(store, identity.chatId)
       const role = requireRole(store, chat.id, identity.roleId)
@@ -694,6 +721,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
 
     await deps.broadcastStoreUpdated(store)
     await deps.sendError(reason)
+    if (promptMessageId) clearRoleErrorRetryCount(roleErrorRetryCounts, identity.chatId, identity.roleId, promptMessageId)
     if (promptMessageId) await deepSeekPromptBatcher.complete(identity.chatId, promptMessageId, identity.roleId)
     return { ok: true, store }
   }
@@ -816,6 +844,168 @@ function updateUserMessageDeliveryStatus(message: GroupMessage): void {
   message.status = 'pending'
 }
 
+type PreparedRoleErrorRetry = {
+  store: OpenTeamStore
+  retryCount: number
+  delayMs: number
+} & (
+  | { delivery: PromptDelivery; externalDelivery?: undefined }
+  | { delivery?: undefined; externalDelivery: ExternalPromptDelivery }
+)
+
+async function prepareRoleErrorRetry(
+  deps: MessageHandlersDependencies,
+  retryCounts: Map<string, number>,
+  chatId: string,
+  roleId: string,
+  promptMessageId: string,
+  replyAttemptId: string | undefined,
+  reason: string,
+): Promise<PreparedRoleErrorRetry | undefined> {
+  if (!isRetryableRoleError(reason)) return undefined
+  const retryDelays = deps.roleErrorRetryDelaysMs ?? DEFAULT_ROLE_ERROR_RETRY_DELAYS_MS
+  const key = roleErrorRetryKey(chatId, roleId, promptMessageId)
+  const usedRetries = retryCounts.get(key) ?? 0
+  if (usedRetries >= retryDelays.length) return undefined
+
+  const timestamp = deps.now()
+  const { store, result } = await mutateStore(store => {
+    const chat = requireChat(store, chatId)
+    const role = requireRole(store, chat.id, roleId)
+    const staleReason = staleReplyReason(store, chat, role, promptMessageId, replyAttemptId)
+    if (staleReason) return undefined
+    const userMessage = store.messagesById[promptMessageId]
+    if (!isUserMessageForRole(userMessage, chat, role)) return undefined
+    if (userMessage.deliveryStatus?.[role.id] !== 'sent') return undefined
+    if (hasAssistantReplyAfterPrompt(store, chat, role, promptMessageId)) return undefined
+
+    const roles = getChatRoles(store, chat)
+    const messages = getChatMessages(store, chat)
+    const roleHistoryCount = countLocalRoleHistory(messages, role, userMessage.id)
+    const includesPersona = shouldIncludePersonaForPrompt(roleHistoryCount)
+    const nextReplyAttemptId = deps.newId('attempt')
+
+    userMessage.deliveryStatus ??= {}
+    userMessage.deliveryStatus[role.id] = 'pending'
+    updateUserMessageDeliveryStatus(userMessage)
+    role.status = 'thinking'
+    role.lastPromptMessageId = userMessage.id
+    role.replyAttemptId = nextReplyAttemptId
+    role.updatedAt = timestamp
+    chat.status = 'running'
+    chat.updatedAt = timestamp
+
+    if (isExternalModelRole(role)) {
+      const model = getExternalModelForRole(store, role)
+      if (!model) return undefined
+      const prompt = buildExternalModelPrompt(store, chat, role, userMessage, roles)
+      if (prompt.memoryPatch) applyExternalMemoryPatch(store, prompt.memoryPatch, timestamp)
+      return {
+        externalDelivery: {
+          roleId,
+          chatId: chat.id,
+          messageId: userMessage.id,
+          replyAttemptId: nextReplyAttemptId,
+          model,
+          prompt: prompt.content,
+        },
+      }
+    }
+
+    const binding = deps.runtimeFrames.getByRole(chat.id, role.id)
+    if (!binding?.ready) return undefined
+    const reference = userMessage.references?.[0]
+    const unsyncedContext = buildUnsyncedContext(chat, role, messages, userMessage, store.settings.maxContextChars)
+    const content = buildPrompt({ chat, role, userMessage, roles, unsyncedContext, reference, includePersona: includesPersona })
+    return {
+      delivery: {
+        roleId,
+        chatSite: role.chatSite ?? store.settings.defaultChatSite,
+        tabId: binding.tabId,
+        frameId: binding.frameId,
+        message: { type: 'TEAM_SEND_PROMPT' as const, chatId: chat.id, roleId, messageId: userMessage.id, replyAttemptId: nextReplyAttemptId, content, includesPersona },
+      },
+    }
+  })
+
+  if (!result) return undefined
+  const retryCount = usedRetries + 1
+  retryCounts.set(key, retryCount)
+  return { ...result, store, retryCount, delayMs: retryDelays[usedRetries] ?? 0 }
+}
+
+function isRetryableRoleError(reason: string): boolean {
+  const normalized = reason.toLowerCase()
+  const nonRetryablePatterns = [
+    'abort',
+    'aborted',
+    'unauthorized',
+    'invalid_api_key',
+    'model_not_found',
+    '401',
+    '403',
+    'api key',
+    '已停止',
+    '停止回复',
+    '用户停止',
+    '找不到外部模型',
+    '模型不存在',
+    '密钥',
+  ]
+  return !nonRetryablePatterns.some(pattern => normalized.includes(pattern))
+}
+
+function clearRoleErrorRetryCount(retryCounts: Map<string, number>, chatId: string, roleId: string, messageId: string): void {
+  retryCounts.delete(roleErrorRetryKey(chatId, roleId, messageId))
+}
+
+function roleErrorRetryKey(chatId: string, roleId: string, messageId: string): string {
+  return `${chatId}:${roleId}:${messageId}`
+}
+
+function withLatestPromptBinding(deps: MessageHandlersDependencies, chatId: string, delivery: PromptDelivery): PromptDelivery {
+  const binding = deps.runtimeFrames.getByRole(chatId, delivery.roleId)
+  if (!binding?.ready) return delivery
+  return { ...delivery, tabId: binding.tabId, frameId: binding.frameId }
+}
+
+async function isPromptDeliveryStillActive(
+  deps: MessageHandlersDependencies,
+  chatId: string,
+  roleId: string,
+  messageId: string,
+  replyAttemptId: string | undefined,
+): Promise<boolean> {
+  const { result } = await mutateStore(store => {
+    const chat = requireChat(store, chatId)
+    const role = requireRole(store, chat.id, roleId)
+    if (role.status === 'stopped') return false
+    if (staleReplyReason(store, chat, role, messageId, replyAttemptId)) return false
+    if (hasAssistantReplyAfterPrompt(store, chat, role, messageId)) return false
+    return true
+  })
+  return result
+}
+
+function hasAssistantReplyAfterPrompt(store: OpenTeamStore, chat: GroupChat, role: GroupRole, promptMessageId: string): boolean {
+  const promptIndex = chat.messageIds.indexOf(promptMessageId)
+  if (promptIndex < 0) return false
+  for (let index = promptIndex + 1; index < chat.messageIds.length; index += 1) {
+    const message = store.messagesById[chat.messageIds[index]]
+    if (isAssistantMessageForRole(message, chat, role) && (message.status === 'received' || Boolean(message.content.trim()))) return true
+  }
+  return false
+}
+
+async function waitForRetryDelay(deps: MessageHandlersDependencies, delayMs: number): Promise<void> {
+  if (delayMs <= 0) return
+  if (deps.waitForRetry) {
+    await deps.waitForRetry(delayMs)
+    return
+  }
+  await new Promise<void>(resolve => setTimeout(resolve, delayMs))
+}
+
 interface DeepSeekPromptBatcher {
   enqueue(chatId: string, messageId: string, deliveries: PromptDelivery[]): Promise<void>
   complete(chatId: string, messageId: string, roleId: string): Promise<void>
@@ -875,25 +1065,46 @@ function createDeepSeekPromptBatcher(deps: MessageHandlersDependencies): DeepSee
 
 async function sendPromptDeliveries(deps: MessageHandlersDependencies, deepSeekPromptBatcher: DeepSeekPromptBatcher, chatId: string, messageId: string, deliveries: PromptDelivery[]): Promise<void> {
   const deepSeekDeliveries: PromptDelivery[] = []
+  const standardDeliveries: Array<Promise<boolean>> = []
   for (const delivery of deliveries) {
     if (delivery.chatSite === 'deepseek') {
       deepSeekDeliveries.push(delivery)
       continue
     }
-    await sendPromptDelivery(deps, chatId, messageId, delivery)
+    standardDeliveries.push(sendPromptDelivery(deps, chatId, messageId, delivery))
   }
+  await Promise.all(standardDeliveries)
   await deepSeekPromptBatcher.enqueue(chatId, messageId, deepSeekDeliveries)
 }
 
 async function sendPromptDelivery(deps: MessageHandlersDependencies, chatId: string, messageId: string, delivery: PromptDelivery): Promise<boolean> {
-  try {
-    await deps.sendPrompt(delivery)
-    return true
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    await markDeliveryError(deps, chatId, delivery.roleId, messageId, reason)
-    return false
+  const retryDelays = deps.deliveryRetryDelaysMs ?? DEFAULT_DELIVERY_RETRY_DELAYS_MS
+  let lastReason = '发送失败'
+
+  for (let attemptIndex = 0; attemptIndex <= retryDelays.length; attemptIndex += 1) {
+    try {
+      await deps.sendPrompt(withLatestPromptBinding(deps, chatId, delivery))
+      return true
+    } catch (error) {
+      lastReason = error instanceof Error ? error.message : String(error)
+      const canRetry = attemptIndex < retryDelays.length && await isPromptDeliveryStillActive(deps, chatId, delivery.roleId, messageId, delivery.message.replyAttemptId)
+      if (!canRetry) break
+
+      const delayMs = retryDelays[attemptIndex] ?? 0
+      deps.log.warn('delivery:retry-scheduled', {
+        chatId,
+        roleId: delivery.roleId,
+        messageId,
+        retryCount: attemptIndex + 1,
+        delayMs,
+        reason: lastReason,
+      })
+      await waitForRetryDelay(deps, delayMs)
+    }
   }
+
+  await markDeliveryError(deps, chatId, delivery.roleId, messageId, lastReason)
+  return false
 }
 
 async function sendExternalModelDelivery(deps: MessageHandlersDependencies, client: ExternalModelClient, runs: ExternalModelRunRegistry, delivery: ExternalPromptDelivery): Promise<OpenTeamStore | undefined> {
@@ -919,23 +1130,47 @@ async function sendExternalModelDelivery(deps: MessageHandlersDependencies, clie
     replyMessageId = initialized.replyMessageId
     await deps.broadcastStoreUpdated(initialized.store)
 
-    const stream = typeof client.stream === 'function'
-      ? client.stream({ model: delivery.model, prompt: delivery.prompt, abortSignal: controller.signal })
-      : streamCompleteFallback(client, { model: delivery.model, prompt: delivery.prompt, abortSignal: controller.signal })
-    for await (const chunk of abortableChunks(stream, controller.signal)) {
-      throwIfAborted(controller.signal)
-      if (!chunk) continue
-      content += chunk
-      const update = await updateExternalAssistantContent(deps, delivery, replyMessageId, content)
-      if (update.ignored) {
-        deps.log.warn('external-model:stream:ignored-stale', { chatId: delivery.chatId, roleId: delivery.roleId, messageId: delivery.messageId, reason: update.reason })
-        return update.store
-      }
-      await deps.broadcastStoreUpdated(update.store)
-    }
-    throwIfAborted(controller.signal)
+    const retryDelays = deps.externalModelRetryDelaysMs ?? DEFAULT_EXTERNAL_MODEL_RETRY_DELAYS_MS
+    for (let attemptIndex = 0; attemptIndex <= retryDelays.length; attemptIndex += 1) {
+      try {
+        content = ''
+        const stream = typeof client.stream === 'function'
+          ? client.stream({ model: delivery.model, prompt: delivery.prompt, abortSignal: controller.signal })
+          : streamCompleteFallback(client, { model: delivery.model, prompt: delivery.prompt, abortSignal: controller.signal })
+        for await (const chunk of abortableChunks(stream, controller.signal)) {
+          throwIfAborted(controller.signal)
+          if (!chunk) continue
+          content += chunk
+          const update = await updateExternalAssistantContent(deps, delivery, replyMessageId, content)
+          if (update.ignored) {
+            deps.log.warn('external-model:stream:ignored-stale', { chatId: delivery.chatId, roleId: delivery.roleId, messageId: delivery.messageId, reason: update.reason })
+            return update.store
+          }
+          await deps.broadcastStoreUpdated(update.store)
+        }
+        throwIfAborted(controller.signal)
+        if (!content.trim()) throw new Error('外部模型返回格式无效')
+        break
+      } catch (error) {
+        if (isAbortError(error) || controller.signal.aborted) throw error
+        if (content.trim()) throw error
+        const reason = error instanceof Error ? error.message : String(error)
+        const canRetry = attemptIndex < retryDelays.length && await isPromptDeliveryStillActive(deps, delivery.chatId, delivery.roleId, delivery.messageId, delivery.replyAttemptId)
+        if (!canRetry) throw error
 
-    if (!content.trim()) throw new Error('外部模型返回格式无效')
+        const delayMs = retryDelays[attemptIndex] ?? 0
+        deps.log.warn('external-model:retry-scheduled', {
+          chatId: delivery.chatId,
+          roleId: delivery.roleId,
+          messageId: delivery.messageId,
+          retryCount: attemptIndex + 1,
+          delayMs,
+          reason,
+        })
+        await waitForRetryDelay(deps, delayMs)
+      }
+    }
+
     const finalized = await finishExternalAssistantReply(deps, delivery, replyMessageId, content)
     if (finalized.ignored) {
       deps.log.warn('external-model:reply:ignored-stale', { chatId: delivery.chatId, roleId: delivery.roleId, messageId: delivery.messageId, reason: finalized.reason })

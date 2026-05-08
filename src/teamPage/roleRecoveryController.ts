@@ -44,7 +44,7 @@ export function createRoleRecoveryController(deps: RoleRecoveryDependencies): Ro
     const chat = deps.state.selectedChatId ? store.chatsById[deps.state.selectedChatId] : undefined
     if (!chat) return
 
-    const reconnectableRoles = deps.getCurrentRoles().filter(role => role.status !== 'ready' && shouldAutoReconnectRole(role))
+    const reconnectableRoles = deps.getCurrentRoles().filter(shouldRefreshRoleManually)
     if (reconnectableRoles.length === 0) return
 
     deps.log.info('ui:refresh-recover-chat', { chatId: chat.id, roleIds: reconnectableRoles.map(role => role.id) })
@@ -209,6 +209,12 @@ export function createRoleRecoveryController(deps: RoleRecoveryDependencies): Ro
       return role?.chatId === chatId && role.name.trim() ? role.name : roleId
     })
   }
+}
+
+function shouldRefreshRoleManually(role: GroupRole): boolean {
+  if (role.modelSource === 'external') return false
+  if (role.status === 'thinking') return shouldAutoReconnectRole(role)
+  return true
 }
 
 function teamRoleKey(chatId: string, roleId: string): string {

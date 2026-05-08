@@ -115,6 +115,8 @@ const rolePanelView = createRolePanelView({
   roleToneClass,
   roleAvatarLabel,
   insertMention: role => insertMention(role),
+  refreshCurrentChat: () => roleRecoveryController.refreshCurrentChat(),
+  focusRoleFrame: (chatId, roleId) => roleRecoveryController.focusRoleFrame(chatId, roleId),
   runCommand,
   showError,
 })
