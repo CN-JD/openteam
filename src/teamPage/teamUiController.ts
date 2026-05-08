@@ -2,9 +2,10 @@ import { getDefaultChatSiteUrl } from '../group/conversationUrl'
 import type { ChatSite, GroupChat, GroupRole, RoomMode } from '../group/types'
 import type { TeamPageState } from './appState'
 import { requireElement } from './domRefs'
+import type { RoleFrameState } from './iframeHost'
 
 interface TeamUiIframeHost {
-  restoreChat(chat: GroupChat, roles: GroupRole[]): void
+  restoreChat(chat: GroupChat, roles: GroupRole[]): RoleFrameState[]
 }
 
 export interface TeamUiControllerDependencies {
@@ -132,8 +133,10 @@ export function createTeamUiController(deps: TeamUiControllerDependencies): Team
       if (!chat) return
       const roles = deps.getCurrentRoles().filter(role => role.modelSource !== 'external')
       deps.log.info('ui:restore-chat', { chatId: chat.id, roleIds: roles.map(role => role.id) })
-      deps.iframeHost.restoreChat({ ...chat, roleIds: roles.map(role => role.id) }, roles)
-      Promise.all(roles.map(role => deps.runCommand('GROUP_ROLE_RECOVER', { chatId: chat.id, roleId: role.id }))).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
+      const restoredFrames = deps.iframeHost.restoreChat({ ...chat, roleIds: roles.map(role => role.id) }, roles)
+      const assignedRoleIds = new Set(restoredFrames.filter(frame => frame.status === 'assigned').map(frame => frame.roleId))
+      const rolesToRecover = roles.filter(role => !assignedRoleIds.has(role.id))
+      Promise.all(rolesToRecover.map(role => deps.runCommand('GROUP_ROLE_RECOVER', { chatId: chat.id, roleId: role.id }))).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
     })
 
     deps.registerComposerEvents()
