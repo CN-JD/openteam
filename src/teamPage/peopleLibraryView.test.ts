@@ -37,6 +37,7 @@ function makeChat(id: string): GroupChat {
 }
 
 function setupPeopleLibraryView(options: { store: OpenTeamStore; templates: RoleTemplate[]; currentChat?: GroupChat }) {
+  const state = createTeamPageState()
   const addLibraryPeopleListEl = document.createElement('div')
   const addLibraryPeopleFormEl = document.createElement('form')
   const peopleLibrarySearchEl = document.createElement('input')
@@ -66,7 +67,7 @@ function setupPeopleLibraryView(options: { store: OpenTeamStore; templates: Role
   const runCommand = vi.fn(async () => undefined)
   const showError = vi.fn()
   const view = createPeopleLibraryView({
-    state: createTeamPageState(),
+    state,
     getStore: () => options.store,
     settingsButtonEl: document.createElement('button'),
     settingsMenuEl: document.createElement('div'),
@@ -132,6 +133,7 @@ function setupPeopleLibraryView(options: { store: OpenTeamStore; templates: Role
     log: { info: vi.fn() },
   })
   return {
+    state,
     view,
     addLibraryPeopleFormEl,
     addLibraryPeopleListEl,
@@ -380,18 +382,18 @@ describe('team page people library view boundary', () => {
     view.registerPeopleLibraryEvents()
     view.renderTemplates()
 
-    expect(peopleLibraryListEl.textContent).toContain('弗兰克尔')
-    expect(peopleLibraryListEl.textContent).toContain('内置')
-    expect(peopleLibraryListEl.textContent).not.toContain('人员1')
-    expect(peopleLibraryBuiltinTabEl.className).toContain('active')
-    expect(peopleLibraryListEl.querySelector('.template-delete')).toBeNull()
-
-    peopleLibraryCustomTabEl.click()
     expect(peopleLibraryListEl.textContent).toContain('人员1')
     expect(peopleLibraryListEl.textContent).toContain('自定义')
     expect(peopleLibraryListEl.textContent).not.toContain('弗兰克尔')
     expect(peopleLibraryCustomTabEl.className).toContain('active')
     expect(peopleLibraryListEl.querySelector('.template-delete')).toBeDefined()
+
+    peopleLibraryBuiltinTabEl.click()
+    expect(peopleLibraryListEl.textContent).toContain('弗兰克尔')
+    expect(peopleLibraryListEl.textContent).toContain('内置')
+    expect(peopleLibraryListEl.textContent).not.toContain('人员1')
+    expect(peopleLibraryBuiltinTabEl.className).toContain('active')
+    expect(peopleLibraryListEl.querySelector('.template-delete')).toBeNull()
   })
 
   it('searches people library entries by name, description, and persona text', () => {
@@ -493,14 +495,14 @@ describe('team page people library view boundary', () => {
 
     view.registerPeopleLibraryEvents()
     view.renderAddPersonDialog()
-    expect(addLibraryPeopleListEl.textContent).toContain('弗兰克尔')
-    expect(addLibraryPeopleListEl.textContent).not.toContain('人员1')
-    expect(addPersonBuiltinTabEl.className).toContain('active')
-
-    addPersonCustomTabEl.click()
     expect(addLibraryPeopleListEl.textContent).toContain('人员1')
     expect(addLibraryPeopleListEl.textContent).not.toContain('弗兰克尔')
     expect(addPersonCustomTabEl.className).toContain('active')
+
+    addPersonBuiltinTabEl.click()
+    expect(addLibraryPeopleListEl.textContent).toContain('弗兰克尔')
+    expect(addLibraryPeopleListEl.textContent).not.toContain('人员1')
+    expect(addPersonBuiltinTabEl.className).toContain('active')
   })
 
   it('shows default custom people in the add-person custom tab for a default store', () => {

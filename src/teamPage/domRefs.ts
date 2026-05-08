@@ -63,6 +63,7 @@ export interface TeamPageDomRefs {
   temporaryPersonModalEl: HTMLElement
   notesPanelEl: HTMLElement
   notesDragHandleEl: HTMLElement
+  notesResizeHandleEl: HTMLElement
   toggleNotesPanelEl: HTMLButtonElement
   closeNotesPanelEl: HTMLButtonElement
   globalNoteTabEl: HTMLButtonElement
@@ -192,6 +193,7 @@ export function createTeamPageDomRefs(): TeamPageDomRefs {
     temporaryPersonModalEl: requireElement<HTMLElement>('#temporary-person-modal'),
     notesPanelEl: requireElement<HTMLElement>('#notes-panel'),
     notesDragHandleEl: requireElement<HTMLElement>('#notes-drag-handle'),
+    notesResizeHandleEl: requireElement<HTMLElement>('#notes-resize-handle'),
     toggleNotesPanelEl: requireElement<HTMLButtonElement>('#toggle-notes-panel'),
     closeNotesPanelEl: requireElement<HTMLButtonElement>('#close-notes-panel'),
     globalNoteTabEl: requireElement<HTMLButtonElement>('#global-note-tab'),

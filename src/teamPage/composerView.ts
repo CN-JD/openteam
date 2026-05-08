@@ -73,13 +73,20 @@ export function createComposerView(deps: ComposerViewDependencies): ComposerView
       deps.targetPreviewEl.textContent = '将作为群消息记录，不触发 AI'
       deps.sendButtonEl.disabled = false
     } else if (reconnecting.length > 0) {
-      deps.targetPreviewEl.textContent = `正在自动连接：${reconnecting.map(roleDisplayName).join('、')}`
-      deps.sendButtonEl.disabled = true
+      const readyTargets = targets.filter(role => !reconnecting.includes(role) && role.status === 'ready')
+      deps.targetPreviewEl.textContent = readyTargets.length > 0
+        ? `将发送给：${readyTargets.map(roleDisplayName).join('、')}；正在连接：${reconnecting.map(roleDisplayName).join('、')}`
+        : `正在自动连接：${reconnecting.map(roleDisplayName).join('、')}`
+      deps.sendButtonEl.disabled = readyTargets.length === 0
     } else if (unavailable.length > 0) {
       const waiting = unavailable.filter(role => !shouldAutoReconnectRole(role))
-      if (waiting.length > 0) {
+      const readyTargets = targets.filter(role => role.status === 'ready')
+      if (waiting.length > 0 && readyTargets.length === 0) {
         deps.targetPreviewEl.textContent = `请稍等：${waiting.map(roleDisplayName).join('、')} 正在回复`
         deps.sendButtonEl.disabled = true
+      } else if (waiting.length > 0) {
+        deps.targetPreviewEl.textContent = `将发送给：${readyTargets.map(roleDisplayName).join('、')}；跳过正在回复：${waiting.map(roleDisplayName).join('、')}`
+        deps.sendButtonEl.disabled = false
       } else {
         deps.targetPreviewEl.textContent = `将先自动连接：${unavailable.map(roleDisplayName).join('、')}`
         deps.sendButtonEl.disabled = false
@@ -207,7 +214,8 @@ export function createComposerView(deps: ComposerViewDependencies): ComposerView
     }
 
     const waitingRoles = targetResult.roles.filter(role => role.status === 'thinking' && !shouldAutoReconnectRole(role))
-    if (waitingRoles.length > 0) {
+    const readyRoles = targetResult.roles.filter(role => role.status === 'ready')
+    if (waitingRoles.length > 0 && readyRoles.length === 0) {
       deps.showError(`请等待人员回复完成：${waitingRoles.map(roleDisplayName).join('、')}`)
       return
     }
@@ -216,7 +224,9 @@ export function createComposerView(deps: ComposerViewDependencies): ComposerView
     const reconnectableRoles = targetResult.roles.filter(role => role.status !== 'ready' && shouldAutoReconnectRole(role))
     clearComposerAfterSend(raw, reference)
     try {
-      if (reconnectableRoles.length > 0) await deps.reconnectRolesForSend(chat, reconnectableRoles)
+      if (reconnectableRoles.length > 0) {
+        await deps.reconnectRolesForSend(chat, reconnectableRoles).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
+      }
       await sendMessageAfterReconnect(chat, raw, reference, targetResult.roles)
     } catch (error) {
       restoreComposerDraft(raw, reference)

@@ -169,7 +169,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
     deps.addPersonModalEl.hidden = false
     deps.state.addPersonSiteMenuId = undefined
     deps.state.addPersonSelectedKeys.clear()
-    deps.state.addPersonTemplateType = 'builtin'
+    deps.state.addPersonTemplateType = 'custom'
     deps.state.addPersonSearchQuery = ''
     deps.addPersonSearchEl.value = ''
     deps.log.info('ui:person-add-dialog:open', { chatId: deps.getCurrentChat()?.id, source: 'mixed' })
@@ -197,9 +197,9 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
     deps.state.selectedTemplateId = undefined
     deps.state.previewTemplateId = undefined
     deps.state.addPersonSiteMenuId = undefined
-    deps.state.peopleLibraryTemplateType = 'builtin'
+    deps.state.peopleLibraryTemplateType = 'custom'
     deps.state.peopleLibrarySearchQuery = ''
-    deps.state.addPersonTemplateType = 'builtin'
+    deps.state.addPersonTemplateType = 'custom'
     deps.state.addPersonSearchQuery = ''
     deps.state.addPersonSelectedKeys.clear()
   }
@@ -210,7 +210,7 @@ export function createPeopleLibraryView(deps: PeopleLibraryViewDependencies): Pe
       deps.settingsButtonEl.setAttribute('aria-expanded', 'false')
       deps.peopleLibraryModalEl.hidden = false
       deps.state.peopleLibraryPage = 0
-      deps.state.peopleLibraryTemplateType = 'builtin'
+      deps.state.peopleLibraryTemplateType = 'custom'
       deps.state.peopleLibrarySearchQuery = ''
       deps.peopleLibrarySearchEl.value = ''
       deps.log.info('ui:people-library:open', { templateCount: deps.getTemplates().length })

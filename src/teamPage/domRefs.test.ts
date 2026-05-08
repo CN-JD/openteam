@@ -69,6 +69,7 @@ describe('team page dom refs', () => {
       <div id="temporary-person-modal"></div>
       <aside id="notes-panel"></aside>
       <div id="notes-drag-handle"></div>
+      <button id="notes-resize-handle"></button>
       <button id="toggle-notes-panel"></button>
       <button id="close-notes-panel"></button>
       <button id="global-note-tab"></button>

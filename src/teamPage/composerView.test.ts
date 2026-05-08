@@ -75,35 +75,46 @@ describe('team page composer targeting', () => {
       reference: undefined,
     })
   })
+
+  it('submits all-member messages when at least one targeted role can receive them', async () => {
+    const { view, deps, runCommand, reconnectRolesForSend, showError } = createComposerHarness({
+      roles: [
+        makeRole('chat-1', 'role-1', '工程师', 'ready'),
+        makeRole('chat-1', 'role-2', '产品经理', 'thinking', Date.now()),
+      ],
+    })
+    deps.messageInputEl.value = '@all 请一起评估'
+
+    await view.submitComposerMessage()
+
+    expect(showError).not.toHaveBeenCalled()
+    expect(reconnectRolesForSend).not.toHaveBeenCalled()
+    expect(runCommand).toHaveBeenCalledWith('GROUP_MESSAGE_SEND', {
+      chatId: 'chat-1',
+      raw: '@all 请一起评估',
+      reference: undefined,
+    })
+  })
 })
 
-function createComposerHarness(options: { roleStatus?: GroupRole['status'] } = {}) {
+function createComposerHarness(options: { roleStatus?: GroupRole['status']; roles?: GroupRole[] } = {}) {
   const store = createDefaultStore()
+  const roles = options.roles ?? [makeRole('chat-1', 'role-1', '工程师', options.roleStatus ?? 'ready')]
   const chat: GroupChat = {
     id: 'chat-1',
     name: '讨论',
     mode: 'independent',
-    roleIds: ['role-1'],
+    roleIds: roles.map(role => role.id),
     messageIds: [],
     nextMessageSeq: 1,
     status: 'ready',
     createdAt: 0,
     updatedAt: 0,
   }
-  const role: GroupRole = {
-    id: 'role-1',
-    chatId: chat.id,
-    name: '工程师',
-    systemPrompt: '从工程角度分析',
-    status: options.roleStatus ?? 'ready',
-    contextCursor: 0,
-    createdAt: 0,
-    updatedAt: 0,
-  }
   store.currentChatId = chat.id
   store.chatOrder = [chat.id]
   store.chatsById[chat.id] = chat
-  store.rolesById[role.id] = role
+  for (const role of roles) store.rolesById[role.id] = role
 
   const state = createTeamPageState()
   state.store = store
@@ -121,7 +132,7 @@ function createComposerHarness(options: { roleStatus?: GroupRole['status'] } = {
     mentionPanelEl: document.createElement('div'),
     getStore: () => store,
     getCurrentChat: () => chat,
-    getCurrentRoles: () => [role],
+    getCurrentRoles: () => roles,
     roleToneClass: () => 'tone-test',
     roleAvatarLabel: () => '工',
     reconnectRolesForSend,
@@ -135,5 +146,18 @@ function createComposerHarness(options: { roleStatus?: GroupRole['status'] } = {
     runCommand,
     reconnectRolesForSend,
     showError,
+  }
+}
+
+function makeRole(chatId: string, id: string, name: string, status: GroupRole['status'], updatedAt = 0): GroupRole {
+  return {
+    id,
+    chatId,
+    name,
+    systemPrompt: `从${name}角度分析`,
+    status,
+    contextCursor: 0,
+    createdAt: 0,
+    updatedAt,
   }
 }

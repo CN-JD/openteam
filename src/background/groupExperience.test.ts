@@ -483,6 +483,29 @@ describe('background group chat experience handlers', () => {
     expect(stored.chatsById['chat-1'].status).toBe('error')
   })
 
+  it('still sends to available people when another targeted person is unavailable', async () => {
+    const store = makeStore()
+    store.currentChatId = 'chat-1'
+    store.chatsById['chat-1'] = makeChat('chat-1', ['role-1', 'role-2'])
+    store.chatOrder = ['chat-1']
+    store.rolesById['role-1'] = makeRole('chat-1', 'role-1', '工程师')
+    store.rolesById['role-2'] = makeRole('chat-1', 'role-2', '产品经理')
+    const harness = await setupBackground(store)
+
+    await harness.invoke({ type: 'TEAM_FRAME_ROLE_READY', chatId: 'chat-1', roleId: 'role-1', hostTabId: 900 }, { tab: { id: 101 } as chrome.tabs.Tab, frameId: 7, url: 'https://gemini.google.com/app/test' })
+    const response = await harness.invoke({ type: 'GROUP_MESSAGE_SEND', chatId: 'chat-1', raw: '@all 请评估这个方案' }) as { ok: boolean; message: { id: string }; store: OpenTeamStore }
+
+    expect(response.ok).toBe(true)
+    expect(promptRoleIds(harness)).toEqual(['role-1'])
+    expect(response.store.messagesById[response.message.id].deliveryStatus).toEqual({
+      'role-1': 'pending',
+      'role-2': 'error',
+    })
+    expect(response.store.rolesById['role-1'].status).toBe('thinking')
+    expect(response.store.rolesById['role-2'].status).toBe('error')
+    expect(response.store.chatsById['chat-1'].status).toBe('running')
+  })
+
   it('advances context cursor only to the acknowledged prompt message', async () => {
     const store = makeStore()
     store.currentChatId = 'chat-1'

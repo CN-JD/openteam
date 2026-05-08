@@ -88,8 +88,9 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
         if (isExternalModelRole(role)) return !getExternalModelForRole(store, role)
         return !isRoleDeliverable(role, deps.runtimeFrames.getByRole(chat.id, role.id), timestamp)
       })
+      const deliverableTargetRoles = targetRoles.filter(role => !unavailable.includes(role))
 
-      if (unavailable.length > 0) {
+      if (unavailable.length > 0 && deliverableTargetRoles.length === 0) {
         deps.log.warn('message-send:unavailable-targets', {
           chatId: chat.id,
           targets: unavailable.map(role => ({
@@ -103,8 +104,22 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
         })
         throw new Error(`以下人员不可用，请等待或恢复：${unavailable.map(role => role.name).join('、')}`)
       }
+      if (unavailable.length > 0) {
+        deps.log.warn('message-send:partial-unavailable-targets', {
+          chatId: chat.id,
+          skippedTargets: unavailable.map(role => ({
+            id: role.id,
+            name: role.name,
+            status: role.status,
+            updatedAt: role.updatedAt,
+            staleThinking: isStaleThinkingRole(role, timestamp),
+            binding: isExternalModelRole(role) ? undefined : deps.runtimeFrames.getByRole(chat.id, role.id),
+          })),
+          deliverableTargetIds: deliverableTargetRoles.map(role => role.id),
+        })
+      }
 
-      for (const role of targetRoles) recoverDeliverableRoleStatus(role, timestamp, deps.log)
+      for (const role of deliverableTargetRoles) recoverDeliverableRoleStatus(role, timestamp, deps.log)
 
       const reference = resolveReference(store, chat, message.reference ?? (Array.isArray(message.references) ? message.references[0] : undefined), deps.newId)
       const userMessage: GroupMessage = {
@@ -119,8 +134,9 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
         references: reference ? [reference] : undefined,
         createdAt: timestamp,
         status: parsed.targetRoleIds.length > 0 ? 'pending' : 'received',
-        deliveryStatus: Object.fromEntries(parsed.targetRoleIds.map(roleId => [roleId, 'pending'])),
+        deliveryStatus: Object.fromEntries(parsed.targetRoleIds.map(roleId => [roleId, unavailable.some(role => role.id === roleId) ? 'error' : 'pending'])),
       }
+      updateUserMessageDeliveryStatus(userMessage)
 
       store.messagesById[userMessage.id] = userMessage
       chat.messageIds.push(userMessage.id)
@@ -136,8 +152,8 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       const messages = getChatMessages(store, chat)
       const deliveries: PromptDelivery[] = []
       const externalDeliveries: ExternalPromptDelivery[] = []
-      for (const roleId of parsed.targetRoleIds) {
-        const role = requireRole(store, chat.id, roleId)
+      for (const role of deliverableTargetRoles) {
+        const roleId = role.id
         const roleHistoryCount = countLocalRoleHistory(messages, role, userMessage.id)
         const includesPersona = shouldIncludePersonaForPrompt(roleHistoryCount)
         const replyAttemptId = deps.newId('attempt')
@@ -181,6 +197,13 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
         role.lastPromptMessageId = userMessage.id
         role.replyAttemptId = replyAttemptId
         role.updatedAt = timestamp
+      }
+      for (const role of unavailable) {
+        const keepActiveThinking = role.status === 'thinking' && !isStaleThinkingRole(role, timestamp)
+        if (!keepActiveThinking) role.status = 'error'
+        role.updatedAt = timestamp
+        if (role.lastPromptMessageId === userMessage.id) delete role.lastPromptMessageId
+        if (!keepActiveThinking) delete role.replyAttemptId
       }
 
       return { message: userMessage, deliveries, externalDeliveries }
@@ -505,9 +528,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
       const userMessage = store.messagesById[messageId]
       if (userMessage?.deliveryStatus?.[role.id] === 'pending') {
         userMessage.deliveryStatus[role.id] = 'sent'
-        if (Object.values(userMessage.deliveryStatus).every(status => status === 'sent' || status === 'received')) {
-          userMessage.status = 'sent'
-        }
+        updateUserMessageDeliveryStatus(userMessage)
       }
       if (userMessage) role.contextCursor = Math.max(role.contextCursor, userMessage.seq)
       role.updatedAt = deps.now()
@@ -590,7 +611,7 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
         const userMessage = store.messagesById[promptMessageId]
         if (userMessage?.deliveryStatus?.[role.id]) {
           userMessage.deliveryStatus[role.id] = 'received'
-          if (Object.values(userMessage.deliveryStatus).every(status => status === 'received')) userMessage.status = 'received'
+          updateUserMessageDeliveryStatus(userMessage)
         }
       }
 
@@ -661,10 +682,10 @@ export function createMessageHandlers(deps: MessageHandlersDependencies): Backgr
         const userMessage = store.messagesById[promptMessageId]
         if (userMessage?.deliveryStatus?.[role.id]) {
           userMessage.deliveryStatus[role.id] = 'error'
-          userMessage.status = 'error'
+          updateUserMessageDeliveryStatus(userMessage)
         }
       }
-      chat.status = 'error'
+      chat.status = deps.getChatStatusFromRoles(store, chat)
       chat.updatedAt = role.updatedAt
     })
 
@@ -765,13 +786,31 @@ async function markDeliveryError(deps: MessageHandlersDependencies, chatId: stri
     const userMessage = store.messagesById[messageId]
     if (userMessage?.deliveryStatus) {
       userMessage.deliveryStatus[roleId] = 'error'
-      userMessage.status = 'error'
+      updateUserMessageDeliveryStatus(userMessage)
     }
-    chat.status = 'error'
+    chat.status = deps.getChatStatusFromRoles(store, chat)
     chat.updatedAt = role.updatedAt
   })
   await deps.broadcastStoreUpdated(store)
   await deps.sendError(reason)
+}
+
+function updateUserMessageDeliveryStatus(message: GroupMessage): void {
+  const statuses = Object.values(message.deliveryStatus ?? {})
+  if (statuses.length === 0) return
+  if (statuses.every(status => status === 'error')) {
+    message.status = 'error'
+    return
+  }
+  if (statuses.every(status => status === 'received' || status === 'error')) {
+    message.status = 'received'
+    return
+  }
+  if (statuses.every(status => status === 'sent' || status === 'received' || status === 'error')) {
+    message.status = 'sent'
+    return
+  }
+  message.status = 'pending'
 }
 
 interface DeepSeekPromptBatcher {
@@ -949,7 +988,7 @@ async function createExternalAssistantPlaceholder(
     const userMessage = store.messagesById[delivery.messageId]
     if (userMessage?.deliveryStatus?.[role.id] === 'pending') {
       userMessage.deliveryStatus[role.id] = 'sent'
-      if (Object.values(userMessage.deliveryStatus).every(status => status === 'sent' || status === 'received')) userMessage.status = 'sent'
+      updateUserMessageDeliveryStatus(userMessage)
     }
     role.updatedAt = timestamp
     chat.updatedAt = timestamp
@@ -1002,7 +1041,7 @@ async function finishExternalAssistantReply(
       const userMessage = store.messagesById[delivery.messageId]
       if (userMessage?.deliveryStatus?.[role.id]) {
         userMessage.deliveryStatus[role.id] = 'received'
-        if (Object.values(userMessage.deliveryStatus).every(status => status === 'received')) userMessage.status = 'received'
+        updateUserMessageDeliveryStatus(userMessage)
       }
 
       role.status = 'ready'

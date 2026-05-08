@@ -1672,7 +1672,8 @@ select:focus {
   visibility: visible;
 }
 
-.notes-panel.dragging {
+.notes-panel.dragging,
+.notes-panel.resizing {
   transition: none;
   user-select: none;
 }
@@ -1693,6 +1694,36 @@ select:focus {
 
 .notes-panel-header .icon-btn {
   cursor: pointer;
+}
+
+.notes-resize-handle {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(132, 153, 171, 0.12);
+  cursor: nwse-resize;
+}
+
+.notes-resize-handle::before {
+  content: '';
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid rgba(236, 246, 248, 0.62);
+  border-bottom: 2px solid rgba(236, 246, 248, 0.62);
+  box-shadow: 4px 4px 0 -2px rgba(47, 216, 204, 0.55);
+}
+
+.notes-resize-handle:hover,
+.notes-resize-handle:focus-visible {
+  background: rgba(47, 216, 204, 0.16);
+  outline: 1px solid rgba(47, 216, 204, 0.38);
 }
 
 .note-scope-tabs {
