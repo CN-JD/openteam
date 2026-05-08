@@ -323,6 +323,7 @@ const orchestrationModalView = createOrchestrationModalView({
   getStore: () => store,
   getCurrentChat,
   getCurrentRoles,
+  reconnectRolesForSend,
   runCommand,
   showError,
   showSuccess,
@@ -333,6 +334,7 @@ const orchestrationStatusView = createOrchestrationStatusView({
   getStore: () => store,
   getCurrentChat,
   getCurrentRoles,
+  reconnectRolesForSend,
   runCommand,
   showError,
 })

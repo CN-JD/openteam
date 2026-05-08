@@ -3060,6 +3060,17 @@ select:focus {
   min-height: 520px;
 }
 
+.orchestration-stage-canvas .x6-port-body {
+  transition: opacity 0.16s ease, stroke 0.16s ease, transform 0.16s ease;
+}
+
+.orchestration-stage-canvas .x6-port-body:hover,
+.orchestration-stage-canvas .x6-available-magnet {
+  stroke: #eaffff;
+  stroke-width: 3;
+}
+
+
 .orchestration-empty-hint {
   position: absolute;
   left: 50%;

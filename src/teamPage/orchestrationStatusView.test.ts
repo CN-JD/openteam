@@ -82,6 +82,7 @@ describe('orchestration status view', () => {
       getStore: () => fixture.store,
       getCurrentChat: () => fixture.chat,
       getCurrentRoles: () => fixture.roles,
+      reconnectRolesForSend: vi.fn(async () => undefined),
       runCommand: vi.fn(async () => undefined),
       showError: vi.fn(),
     })
@@ -102,6 +103,7 @@ describe('orchestration status view', () => {
       getStore: () => completed.store,
       getCurrentChat: () => completed.chat,
       getCurrentRoles: () => completed.roles,
+      reconnectRolesForSend: vi.fn(async () => undefined),
       runCommand: vi.fn(async () => undefined),
       showError: vi.fn(),
     }).renderOrchestrationStatus()
@@ -109,6 +111,7 @@ describe('orchestration status view', () => {
       getStore: () => stopped.store,
       getCurrentChat: () => stopped.chat,
       getCurrentRoles: () => stopped.roles,
+      reconnectRolesForSend: vi.fn(async () => undefined),
       runCommand: vi.fn(async () => undefined),
       showError: vi.fn(),
     }).renderOrchestrationStatus()
@@ -119,13 +122,14 @@ describe('orchestration status view', () => {
     expect(stoppedNode?.textContent).toContain('编排已停止')
   })
 
-  it('dispatches stop, retry stage, skip stage, and retry review actions when applicable', () => {
+  it('dispatches stop, retry stage, skip stage, and retry review actions when applicable', async () => {
     const running = baseFixture('running')
     const runCommand = vi.fn(async () => undefined)
     const runningNode = createOrchestrationStatusView({
       getStore: () => running.store,
       getCurrentChat: () => running.chat,
       getCurrentRoles: () => running.roles,
+      reconnectRolesForSend: vi.fn(async () => undefined),
       runCommand,
       showError: vi.fn(),
     }).renderOrchestrationStatus()
@@ -135,15 +139,19 @@ describe('orchestration status view', () => {
 
     const failed = baseFixture('error')
     const failedRunCommand = vi.fn(async () => undefined)
+    const failedReconnectRolesForSend = vi.fn(async () => undefined)
     const failedNode = createOrchestrationStatusView({
       getStore: () => failed.store,
       getCurrentChat: () => failed.chat,
       getCurrentRoles: () => failed.roles,
+      reconnectRolesForSend: failedReconnectRolesForSend,
       runCommand: failedRunCommand,
       showError: vi.fn(),
     }).renderOrchestrationStatus()
     failedNode?.querySelector<HTMLButtonElement>('button:nth-of-type(1)')?.click()
     failedNode?.querySelector<HTMLButtonElement>('button:nth-of-type(2)')?.click()
+    await flushAsync()
+    expect(failedReconnectRolesForSend).toHaveBeenCalledWith(failed.chat, [failed.roles[0]])
     expect(failedRunCommand).toHaveBeenCalledWith('GROUP_ORCHESTRATION_RETRY_STAGE', { chatId: failed.chat.id, stageId: 'stage-1' })
     expect(failedRunCommand).toHaveBeenCalledWith('GROUP_ORCHESTRATION_SKIP_STAGE', { chatId: failed.chat.id, stageId: 'stage-1' })
 
@@ -153,10 +161,16 @@ describe('orchestration status view', () => {
       getStore: () => failed.store,
       getCurrentChat: () => failed.chat,
       getCurrentRoles: () => failed.roles,
+      reconnectRolesForSend: vi.fn(async () => undefined),
       runCommand: reviewRunCommand,
       showError: vi.fn(),
     }).renderOrchestrationStatus()
     reviewNode?.querySelector<HTMLButtonElement>('button:nth-of-type(1)')?.click()
+    await flushAsync()
     expect(reviewRunCommand).toHaveBeenCalledWith('GROUP_ORCHESTRATION_RETRY_REVIEW', { chatId: failed.chat.id })
   })
 })
+
+function flushAsync(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0))
+}

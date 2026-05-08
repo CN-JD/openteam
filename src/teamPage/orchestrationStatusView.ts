@@ -4,6 +4,7 @@ export interface OrchestrationStatusViewDependencies {
   getStore(): OpenTeamStore
   getCurrentChat(): GroupChat | undefined
   getCurrentRoles(): GroupRole[]
+  reconnectRolesForSend(chat: GroupChat, roles: GroupRole[]): Promise<void>
   runCommand(type: string, payload?: Record<string, unknown>): Promise<void>
   showError(message: string): void
 }
@@ -43,7 +44,7 @@ export function createOrchestrationStatusView(deps: OrchestrationStatusViewDepen
     title.textContent = statusTitle(run, flow, current)
     header.append(title)
 
-    const actions = renderActions(chat.id, run, current)
+    const actions = renderActions(chat, run, current)
     if (actions) header.append(actions)
     card.append(header)
 
@@ -87,19 +88,19 @@ export function createOrchestrationStatusView(deps: OrchestrationStatusViewDepen
     return waiting.length > 0 ? waiting.join('、') : undefined
   }
 
-  function renderActions(chatId: string, run: OrchestrationRun, current: OrchestrationStageRun | undefined): HTMLElement | undefined {
+  function renderActions(chat: GroupChat, run: OrchestrationRun, current: OrchestrationStageRun | undefined): HTMLElement | undefined {
     const actions = document.createElement('div')
     actions.className = 'orchestration-status-actions'
     if (run.status === 'running' || run.status === 'pending') {
-      actions.append(actionButton('停止', 'btn-danger', () => runAction('GROUP_ORCHESTRATION_STOP', { chatId })))
+      actions.append(actionButton('停止', 'btn-danger', () => runAction('GROUP_ORCHESTRATION_STOP', { chatId: chat.id })))
     }
     if ((run.status === 'error' || current?.status === 'error') && current) {
       if (current.kind === 'review') {
-        actions.append(actionButton('重试复核', 'btn-primary', () => runAction('GROUP_ORCHESTRATION_RETRY_REVIEW', { chatId })))
+        actions.append(actionButton('重试复核', 'btn-primary', () => retryAction(chat, current, 'GROUP_ORCHESTRATION_RETRY_REVIEW', { chatId: chat.id })))
       } else {
-        actions.append(actionButton('重试阶段', 'btn-primary', () => runAction('GROUP_ORCHESTRATION_RETRY_STAGE', { chatId, stageId: current.stageId })))
+        actions.append(actionButton('重试阶段', 'btn-primary', () => retryAction(chat, current, 'GROUP_ORCHESTRATION_RETRY_STAGE', { chatId: chat.id, stageId: current.stageId })))
       }
-      actions.append(actionButton('跳过阶段', 'btn-ghost', () => runAction('GROUP_ORCHESTRATION_SKIP_STAGE', { chatId, stageId: current.stageId })))
+      actions.append(actionButton('跳过阶段', 'btn-ghost', () => runAction('GROUP_ORCHESTRATION_SKIP_STAGE', { chatId: chat.id, stageId: current.stageId })))
     }
     return actions.childElementCount > 0 ? actions : undefined
   }
@@ -115,6 +116,17 @@ export function createOrchestrationStatusView(deps: OrchestrationStatusViewDepen
 
   function runAction(type: string, payload: Record<string, unknown>): void {
     deps.runCommand(type, payload).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
+  }
+
+  function retryAction(chat: GroupChat, current: OrchestrationStageRun, type: string, payload: Record<string, unknown>): void {
+    deps.reconnectRolesForSend(chat, getStageRoles(current))
+      .then(() => deps.runCommand(type, payload))
+      .catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
+  }
+
+  function getStageRoles(current: OrchestrationStageRun): GroupRole[] {
+    const rolesById = new Map(deps.getCurrentRoles().map(role => [role.id, role]))
+    return Object.keys(current.roleRuns).map(roleId => rolesById.get(roleId)).filter((role): role is GroupRole => Boolean(role))
   }
 
   function detail(label: string, value: string, tone?: 'error'): HTMLElement {

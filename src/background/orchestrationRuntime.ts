@@ -496,11 +496,16 @@ function lastReviewResult(run: OrchestrationRun): OrchestrationReviewResult | un
   return undefined
 }
 
-function nextStageDecision(store: OpenTeamStore, chat: GroupChat, run: OrchestrationRun, timestamp: number): { next: true; runId: string; stageIndex: number } | { next: false } {
+function nextStageDecision(store: OpenTeamStore, chat: GroupChat, run: OrchestrationRun, timestamp: number, options: { allowNextRound?: boolean } = {}): { next: true; runId: string; stageIndex: number } | { next: false } {
   const flow = requireFlow(store, chat.id, run.flowId)
   const stageRun = currentStageRun(run)
   const nextStageIndex = (stageRun?.stageIndex ?? -1) + 1
   if (nextStageIndex < flow.stages.length) return { next: true, runId: run.id, stageIndex: nextStageIndex }
+  if (options.allowNextRound !== false && run.currentRound < run.maxRounds) {
+    run.currentRound += 1
+    run.updatedAt = timestamp
+    return { next: true, runId: run.id, stageIndex: 0 }
+  }
   completeRun(store, chat, run, timestamp)
   return { next: false }
 }
@@ -522,7 +527,7 @@ function applyReviewDecision(store: OpenTeamStore, chat: GroupChat, run: Orchest
   if (decision === 'continue' && run.currentRound >= run.maxRounds) {
     run.error = '已达到最大轮次，编排自动完成'
   }
-  return nextStageDecision(store, chat, run, timestamp)
+  return nextStageDecision(store, chat, run, timestamp, { allowNextRound: decision !== 'pass' })
 }
 
 function completeRun(store: OpenTeamStore, chat: GroupChat, run: OrchestrationRun, timestamp: number): void {
@@ -602,4 +607,3 @@ function requireExternalModelForRole(store: OpenTeamStore, role: GroupRole): Ext
   if (!model) throw new Error(`找不到外部模型：${role.externalModelId}`)
   return model
 }
-

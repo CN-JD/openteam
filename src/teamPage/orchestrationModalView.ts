@@ -1,4 +1,4 @@
-import type { GroupChat, GroupRole, OpenTeamStore, OrchestrationFlow, OrchestrationStage } from '../group/types'
+import type { GroupChat, GroupRole, OpenTeamStore, OrchestrationFlow, OrchestrationGraphSnapshot, OrchestrationStage } from '../group/types'
 import { DEFAULT_ORCHESTRATION_MAX_ROUNDS, MAX_ORCHESTRATION_MAX_ROUNDS } from '../group/types'
 import { createOrchestrationCanvas, type LoadX6, type OrchestrationCanvas } from './orchestrationCanvas'
 
@@ -18,6 +18,7 @@ export interface OrchestrationModalDependencies {
   getStore(): OpenTeamStore
   getCurrentChat(): GroupChat | undefined
   getCurrentRoles(): GroupRole[]
+  reconnectRolesForSend(chat: GroupChat, roles: GroupRole[]): Promise<void>
   runCommand(type: string, payload?: Record<string, unknown>): Promise<void>
   showError(message: string): void
   showSuccess(message: string): void
@@ -32,7 +33,9 @@ export interface OrchestrationModalView {
 
 interface FlowDraft {
   flowId?: string
+  task: string
   stages: OrchestrationStage[]
+  graphEdges: OrchestrationGraphSnapshot['edges']
   maxRounds: number
   selectedStageId?: string
 }
@@ -43,7 +46,7 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
   let mounted = false
 
   function emptyDraft(): FlowDraft {
-    return { stages: [], maxRounds: DEFAULT_ORCHESTRATION_MAX_ROUNDS }
+    return { task: '', stages: [], graphEdges: [], maxRounds: DEFAULT_ORCHESTRATION_MAX_ROUNDS }
   }
 
   function open(): void {
@@ -54,7 +57,7 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
     }
     loadDraft(chat)
     deps.orchestrationModalEl.hidden = false
-    deps.orchestrationTaskEl.value = ''
+    deps.orchestrationTaskEl.value = draft.task
     deps.orchestrationMaxRoundsEl.value = String(draft.maxRounds)
     deps.orchestrationMaxRoundsEl.max = String(MAX_ORCHESTRATION_MAX_ROUNDS)
     mountCanvas()
@@ -74,12 +77,19 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
     const store = deps.getStore()
     const flowId = store.orchestrationFlowOrderByChatId[chat.id]?.[0]
     const flow = flowId ? store.orchestrationFlowsById[flowId] : undefined
-    draft = flow ? {
+    if (!flow) {
+      draft = emptyDraft()
+      return
+    }
+    const stages = cloneStages(flow.graph?.stageNodes?.length ? flow.graph.stageNodes : flow.stages)
+    draft = {
       flowId: flow.id,
-      stages: cloneStages(flow.stages),
+      task: flow.description?.trim() ?? '',
+      stages,
+      graphEdges: flow.graph?.edges ? cloneGraphEdges(flow.graph.edges) : sequentialGraphEdges(stages),
       maxRounds: clampMaxRounds(flow.maxRounds),
-      selectedStageId: flow.stages[0]?.id,
-    } : emptyDraft()
+      selectedStageId: stages[0]?.id,
+    }
   }
 
   function mountCanvas(): void {
@@ -92,13 +102,16 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
         render()
       },
       onRoleDropped(roleId, targetStageId) {
-        addRoleToDraft(roleId, targetStageId)
+        if (targetStageId) addRoleToStage(roleId, targetStageId)
+        else addRoleAsStage(roleId)
+      },
+      onGraphChanged(edges) {
+        draft.graphEdges = cloneGraphEdges(edges)
       },
       loadX6: deps.loadX6,
     })
-    canvas.mount(draft.stages, draft.selectedStageId).then(() => {
+    canvas.mount(draft.stages, draft.selectedStageId, draft.graphEdges).then(() => {
       mounted = true
-      canvas?.render(draft.stages, draft.selectedStageId)
     }).catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
   }
 
@@ -109,7 +122,7 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
     deps.orchestrationHintEl.textContent = '从左侧添加人员，串联阶段；同一阶段内多人并行执行。'
     renderPeopleList()
     renderStageSettings()
-    if (mounted) canvas?.render(draft.stages, draft.selectedStageId)
+    if (mounted) canvas?.render(draft.stages, draft.selectedStageId, draft.graphEdges)
   }
 
   function renderPeopleList(): void {
@@ -145,13 +158,13 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
       addStage.className = 'btn btn-ghost'
       addStage.type = 'button'
       addStage.textContent = '新阶段'
-      addStage.addEventListener('click', () => addRoleToDraft(role.id))
+      addStage.addEventListener('click', () => addRoleAsStage(role.id))
       const addParallel = document.createElement('button')
       addParallel.className = 'btn btn-ghost'
       addParallel.type = 'button'
       addParallel.textContent = '并行加入'
       addParallel.disabled = !selectedRolesStage()
-      addParallel.addEventListener('click', () => addRoleToDraft(role.id, draft.selectedStageId))
+      addParallel.addEventListener('click', () => addRoleToSelectedStage(role.id))
       const review = document.createElement('button')
       review.className = 'btn btn-ghost'
       review.type = 'button'
@@ -182,7 +195,7 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
     nameInput.value = selected.name
     nameInput.addEventListener('input', () => {
       selected.name = nameInput.value.trim() || (selected.kind === 'review' ? '审核' : '执行阶段')
-      canvas?.render(draft.stages, draft.selectedStageId)
+      canvas?.render(draft.stages, draft.selectedStageId, draft.graphEdges)
     })
     nameField.append(nameInput)
     const roles = document.createElement('div')
@@ -210,7 +223,7 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
     reviewerSelect.addEventListener('change', () => {
       stage.roleIds = reviewerSelect.value ? [reviewerSelect.value] : []
       stage.review = { reviewerRoleIds: stage.roleIds, instructions: stage.review?.instructions ?? '' }
-      canvas?.render(draft.stages, draft.selectedStageId)
+      canvas?.render(draft.stages, draft.selectedStageId, draft.graphEdges)
     })
     reviewerField.append(reviewerSelect)
 
@@ -259,18 +272,28 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
     return chip
   }
 
-  function addRoleToDraft(roleId: string, targetStageId?: string): void {
-    const target = targetStageId ? draft.stages.find(stage => stage.id === targetStageId && stage.kind === 'roles') : selectedRolesStage()
-    if (target) {
-      if (!target.roleIds.includes(roleId)) target.roleIds.push(roleId)
-      draft.selectedStageId = target.id
-    } else {
-      const stage: OrchestrationStage = { id: newId('stage'), kind: 'roles', name: `阶段 ${draft.stages.filter(item => item.kind === 'roles').length + 1}`, roleIds: [roleId] }
-      const reviewIndex = draft.stages.findIndex(item => item.kind === 'review')
-      if (reviewIndex >= 0) draft.stages.splice(reviewIndex, 0, stage)
-      else draft.stages.push(stage)
-      draft.selectedStageId = stage.id
-    }
+  function addRoleToSelectedStage(roleId: string): void {
+    const target = selectedRolesStage()
+    if (!target) return
+    addRoleToStage(roleId, target.id)
+  }
+
+  function addRoleToStage(roleId: string, targetStageId: string): void {
+    const target = draft.stages.find(stage => stage.id === targetStageId && stage.kind === 'roles')
+    if (!target) return
+    if (!target.roleIds.includes(roleId)) target.roleIds.push(roleId)
+    draft.selectedStageId = target.id
+    render()
+  }
+
+  function addRoleAsStage(roleId: string): void {
+    const sourceStageId = draft.selectedStageId ?? draft.stages[draft.stages.length - 1]?.id
+    const stage: OrchestrationStage = { id: newId('stage'), kind: 'roles', name: `阶段 ${draft.stages.filter(item => item.kind === 'roles').length + 1}`, roleIds: [roleId] }
+    const reviewIndex = draft.stages.findIndex(item => item.kind === 'review')
+    if (reviewIndex >= 0) draft.stages.splice(reviewIndex, 0, stage)
+    else draft.stages.push(stage)
+    if (sourceStageId && sourceStageId !== stage.id) appendGraphEdge(sourceStageId, stage.id)
+    draft.selectedStageId = stage.id
     render()
   }
 
@@ -282,14 +305,23 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
       draft.selectedStageId = existing.id
     } else {
       const stage: OrchestrationStage = { id: newId('review'), kind: 'review', name: '审核', roleIds: [roleId], review: { reviewerRoleIds: [roleId], instructions: '' } }
+      const sourceStageId = draft.selectedStageId ?? draft.stages[draft.stages.length - 1]?.id
       draft.stages.push(stage)
+      if (sourceStageId) appendGraphEdge(sourceStageId, stage.id)
       draft.selectedStageId = stage.id
     }
     render()
   }
 
+  function appendGraphEdge(sourceStageId: string, targetStageId: string): void {
+    if (sourceStageId === targetStageId) return
+    if (draft.graphEdges.some(edge => edge.sourceStageId === sourceStageId && edge.targetStageId === targetStageId)) return
+    draft.graphEdges.push({ sourceStageId, targetStageId })
+  }
+
   function removeStage(stageId: string): void {
     draft.stages = draft.stages.filter(stage => stage.id !== stageId)
+    draft.graphEdges = draft.graphEdges.filter(edge => edge.sourceStageId !== stageId && edge.targetStageId !== stageId)
     draft.selectedStageId = draft.stages[0]?.id
     render()
   }
@@ -312,6 +344,7 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
       return
     }
     const flow = buildFlow(chat)
+    await deps.reconnectRolesForSend(chat, getDraftRoles())
     await deps.runCommand('GROUP_ORCHESTRATION_RUN', { chatId: chat.id, task, flow })
     draft.flowId = flow.id
     deps.showSuccess('编排任务已开始')
@@ -320,17 +353,20 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
 
   function buildFlow(chat: GroupChat): OrchestrationFlow {
     const now = Date.now()
-    const stages = cloneStages(draft.stages)
+    const graphEdges = filterGraphEdges(draft.graphEdges, draft.stages)
+    const stages = orderStagesByGraph(cloneStages(draft.stages), graphEdges)
+    const task = deps.orchestrationTaskEl.value.trim()
     return {
       id: draft.flowId ?? newId('flow'),
       chatId: chat.id,
       name: `${chat.name} 编排流程`,
+      description: task || undefined,
       stages,
       graph: {
         stageNodes: stages,
-        edges: stages.slice(1).map((stage, index) => ({ sourceStageId: stages[index].id, targetStageId: stage.id })),
+        edges: graphEdges,
       },
-      maxRounds: draft.stages.some(stage => stage.kind === 'review') ? draft.maxRounds : DEFAULT_ORCHESTRATION_MAX_ROUNDS,
+      maxRounds: readMaxRoundsInput(deps.orchestrationMaxRoundsEl),
       createdAt: now,
       updatedAt: now,
     }
@@ -379,6 +415,18 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
     return deps.getStore().rolesById[roleId]?.name ?? '未知人员'
   }
 
+  function getDraftRoles(): GroupRole[] {
+    const rolesById = new Map(deps.getCurrentRoles().map(role => [role.id, role]))
+    const roleIds = new Set<string>()
+    for (const stage of draft.stages) {
+      for (const roleId of stage.roleIds) roleIds.add(roleId)
+      if (stage.kind === 'review') {
+        for (const roleId of stage.review?.reviewerRoleIds ?? []) roleIds.add(roleId)
+      }
+    }
+    return [...roleIds].map(roleId => rolesById.get(roleId)).filter((role): role is GroupRole => Boolean(role))
+  }
+
   function registerOrchestrationEvents(): void {
     deps.openOrchestrationEl.addEventListener('click', open)
     deps.closeOrchestrationEl.addEventListener('click', close)
@@ -398,9 +446,69 @@ function cloneStages(stages: OrchestrationStage[]): OrchestrationStage[] {
   }))
 }
 
+function cloneGraphEdges(edges: OrchestrationGraphSnapshot['edges']): OrchestrationGraphSnapshot['edges'] {
+  return edges.map(edge => ({ sourceStageId: edge.sourceStageId, targetStageId: edge.targetStageId }))
+}
+
+function sequentialGraphEdges(stages: OrchestrationStage[]): OrchestrationGraphSnapshot['edges'] {
+  return stages.slice(1).map((stage, index) => ({ sourceStageId: stages[index].id, targetStageId: stage.id }))
+}
+
+function filterGraphEdges(edges: OrchestrationGraphSnapshot['edges'], stages: OrchestrationStage[]): OrchestrationGraphSnapshot['edges'] {
+  const stageIds = new Set(stages.map(stage => stage.id))
+  const seen = new Set<string>()
+  const result: OrchestrationGraphSnapshot['edges'] = []
+  for (const edge of edges) {
+    if (!stageIds.has(edge.sourceStageId) || !stageIds.has(edge.targetStageId) || edge.sourceStageId === edge.targetStageId) continue
+    const key = `${edge.sourceStageId}->${edge.targetStageId}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push({ sourceStageId: edge.sourceStageId, targetStageId: edge.targetStageId })
+  }
+  return result
+}
+
+export function orderStagesByGraph(stages: OrchestrationStage[], edges: OrchestrationGraphSnapshot['edges']): OrchestrationStage[] {
+  const stageIds = new Set(stages.map(stage => stage.id))
+  const validEdges = filterGraphEdges(edges, stages)
+  if (validEdges.length === 0) return stages
+
+  const outgoing = new Map<string, string[]>()
+  const indegree = new Map(stages.map(stage => [stage.id, 0]))
+  for (const edge of validEdges) {
+    outgoing.set(edge.sourceStageId, [...outgoing.get(edge.sourceStageId) ?? [], edge.targetStageId])
+    indegree.set(edge.targetStageId, (indegree.get(edge.targetStageId) ?? 0) + 1)
+  }
+
+  const byId = new Map(stages.map(stage => [stage.id, stage]))
+  const queue = stages.filter(stage => (indegree.get(stage.id) ?? 0) === 0)
+  const ordered: OrchestrationStage[] = []
+  const emitted = new Set<string>()
+  for (let index = 0; index < queue.length; index += 1) {
+    const stage = queue[index]
+    if (!stage || emitted.has(stage.id)) continue
+    ordered.push(stage)
+    emitted.add(stage.id)
+    for (const targetId of outgoing.get(stage.id) ?? []) {
+      if (!stageIds.has(targetId)) continue
+      const nextIndegree = (indegree.get(targetId) ?? 0) - 1
+      indegree.set(targetId, nextIndegree)
+      const target = byId.get(targetId)
+      if (target && nextIndegree === 0) queue.push(target)
+    }
+  }
+
+  if (ordered.length === stages.length) return ordered
+  return [...ordered, ...stages.filter(stage => !emitted.has(stage.id))]
+}
+
 function clampMaxRounds(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_ORCHESTRATION_MAX_ROUNDS
   return Math.min(MAX_ORCHESTRATION_MAX_ROUNDS, Math.max(1, Math.trunc(value)))
+}
+
+function readMaxRoundsInput(input: HTMLInputElement): number {
+  return clampMaxRounds(Number(input.value || DEFAULT_ORCHESTRATION_MAX_ROUNDS))
 }
 
 function roleInitial(name: string): string {

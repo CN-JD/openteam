@@ -133,11 +133,15 @@ describe('team.html chat creation UI', () => {
     expect(html).toMatch(/\.all-note-target\.deleted-chat\s*{[^}]*border-color:\s*rgba\(248,\s*184,\s*78,\s*0\.22\);/s)
   })
 
-  it('adds a stage orchestration modal and left-rail entry', () => {
+  it('adds a stage orchestration modal and chat-header entry before members', () => {
     const html = readTeamDocument()
+    const chatRow = html.match(/<div class="chat-row">(?<body>[\s\S]*?)<\/div>/)?.groups?.body ?? ''
+    const railActions = html.match(/<div class="rail-actions">(?<body>[\s\S]*?)<\/div>/)?.groups?.body ?? ''
 
     expect(html).toContain('id="open-orchestration"')
-    expect(html).toContain('data-tooltip="编排任务"')
+    expect(chatRow.indexOf('id="open-orchestration"')).toBeGreaterThanOrEqual(0)
+    expect(chatRow.indexOf('id="open-orchestration"')).toBeLessThan(chatRow.indexOf('id="toggle-people-drawer"'))
+    expect(railActions).not.toContain('id="open-orchestration"')
     expect(html).toContain('id="orchestration-modal"')
     expect(html).toContain('id="orchestration-task"')
     expect(html).toContain('id="orchestration-people-list"')
