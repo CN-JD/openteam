@@ -2,7 +2,7 @@ import type { GroupChat, GroupMessage, GroupRole, OpenTeamStore, RoleTemplate } 
 import { ensureInviteGate } from '../access/inviteGate'
 import { createDefaultStore } from '../group/store'
 import { getAllRoleTemplates } from '../group/roleTemplates'
-import { createTeamPageState } from './appState'
+import { createTeamPageState, pickSelectedChatId } from './appState'
 import { createAllNotesView } from './allNotesView'
 import { createChatHeaderView } from './chatHeaderView'
 import { createChatListView } from './chatListView'
@@ -383,7 +383,7 @@ async function refreshStore(showFailure = true): Promise<void> {
 function applyStore(nextStore: OpenTeamStore): void {
   appState.store = nextStore
   store = appState.store
-  appState.selectedChatId = pickCurrentChatId()
+  appState.selectedChatId = pickSelectedChatId(appState)
   const roles = getCurrentRoles()
   if (!appState.selectedRoleId || !roles.some(role => role.id === appState.selectedRoleId)) appState.selectedRoleId = roles[0]?.id
   if (appState.selectedReference && appState.selectedReference.messageId && !getCurrentMessages().some(message => message.id === appState.selectedReference?.messageId)) {
@@ -392,14 +392,6 @@ function applyStore(nextStore: OpenTeamStore): void {
   syncIframeHost()
   render()
   notifyRoleReadyWaiters()
-}
-
-function pickCurrentChatId(): string | undefined {
-  if (appState.selectedChatId && store.chatsById[appState.selectedChatId]) return appState.selectedChatId
-  if (store.currentChatId && store.chatsById[store.currentChatId]) return store.currentChatId
-  return [...store.chatOrder]
-    .sort((left, right) => (store.chatsById[right]?.updatedAt ?? 0) - (store.chatsById[left]?.updatedAt ?? 0))
-    .find(chatId => Boolean(store.chatsById[chatId]))
 }
 
 function getCurrentChat(): GroupChat | undefined {

@@ -69,3 +69,12 @@ export function createTeamPageState(): TeamPageState {
     activeNoteScope: 'chat',
   }
 }
+
+export function pickSelectedChatId(state: TeamPageState): string | undefined {
+  const store = state.store
+  if (store.currentChatId && store.chatsById[store.currentChatId]) return store.currentChatId
+  if (state.selectedChatId && store.chatsById[state.selectedChatId]) return state.selectedChatId
+  return [...store.chatOrder]
+    .sort((left, right) => (store.chatsById[right]?.updatedAt ?? 0) - (store.chatsById[left]?.updatedAt ?? 0))
+    .find(chatId => Boolean(store.chatsById[chatId]))
+}
