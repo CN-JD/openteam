@@ -9,6 +9,7 @@ export interface ExternalModelPromptResult {
 
 export interface BuildExternalModelPromptOptions {
   responseInstruction?: string
+  maxContextChars?: number
 }
 
 export type ExternalMemoryPatch =
@@ -27,7 +28,7 @@ export function buildExternalModelPrompt(
   const scope = chat.mode === 'collaborative' ? 'chat' : 'role'
   const memory = scope === 'chat' ? store.externalChatMemoriesById?.[chat.id] : store.externalRoleMemoriesById?.[role.id]
   const contextAfterMemory = scopedMessages.filter(message => message.seq > (memory?.summarizedThroughSeq ?? 0) && message.id !== userMessage.id)
-  const budget = Math.max(240, store.settings.maxContextChars)
+  const budget = Math.max(240, options.maxContextChars ?? store.settings.maxContextChars)
   const directPrompt = buildPromptWithExternalContext(chat, role, userMessage, roles, contextAfterMemory, budget, options)
   const withSummary = joinSections([
     memory?.summary ? `历史摘要：\n${memory.summary}` : undefined,

@@ -1,4 +1,5 @@
 import { buildUnsyncedContext } from '../group/contextSync'
+import { contextCharBudgetForRole } from '../group/contextBudget'
 import { buildExternalModelPrompt, type ExternalMemoryPatch } from '../group/externalModelContext'
 import { buildOrchestrationReviewResponseInstruction } from '../group/orchestrationPrompts'
 import { buildPrompt, roleUsesChatGptGptsPersona } from '../group/promptBuilder'
@@ -42,10 +43,11 @@ export function prepareRolePromptDelivery(input: PrepareRolePromptDeliveryInput)
   const includesPersona = shouldIncludePersonaForPrompt(input.role, roleHistoryCount)
   const replyAttemptId = input.newId('attempt')
   const responseInstruction = responseInstructionForMessage(input.userMessage)
+  const maxContextChars = contextCharBudgetForRole(input.store, input.role)
 
   if (isExternalModelRole(input.role)) {
     const model = requireExternalModelForRole(input.store, input.role)
-    const prompt = buildExternalModelPrompt(input.store, input.chat, input.role, input.userMessage, input.roles, { responseInstruction })
+    const prompt = buildExternalModelPrompt(input.store, input.chat, input.role, input.userMessage, input.roles, { responseInstruction, maxContextChars })
     if (prompt.memoryPatch) applyExternalMemoryPatch(input.store, prompt.memoryPatch, input.timestamp)
     return {
       includesPersona,
@@ -64,7 +66,7 @@ export function prepareRolePromptDelivery(input: PrepareRolePromptDeliveryInput)
 
   const binding = input.runtimeFrames.getByRole(input.chat.id, input.role.id)
   if (!binding?.ready) throw new Error('人员 iframe 尚未就绪，请先恢复人员')
-  const unsyncedContext = buildUnsyncedContext(input.chat, input.role, input.messages, input.userMessage, input.store.settings.maxContextChars)
+  const unsyncedContext = buildUnsyncedContext(input.chat, input.role, input.messages, input.userMessage, maxContextChars)
   const content = buildPrompt({
     chat: input.chat,
     role: input.role,
