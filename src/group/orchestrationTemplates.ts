@@ -39,6 +39,7 @@ export interface BuiltinOrchestrationTemplate {
   name: string
   summary: string
   structure: string
+  defaultTask: string
   capabilities: OrchestrationTemplateCapability[]
   maxNodeExecutions: number
   roles: OrchestrationTemplateRole[]
@@ -55,6 +56,7 @@ export const BUILTIN_ORCHESTRATION_TEMPLATES: BuiltinOrchestrationTemplate[] = [
     name: '顺序接力',
     summary: '一个人员完成后交给下一个人员，适合线性推进。',
     structure: '规划 -> 执行 -> 总结',
+    defaultTask: '请帮我把“上线一个团队知识库功能”的目标拆解成执行计划、完成主要方案，并最终总结成可落地的行动清单。',
     capabilities: ['sequential'],
     maxNodeExecutions: 20,
     roles: [
@@ -78,6 +80,7 @@ export const BUILTIN_ORCHESTRATION_TEMPLATES: BuiltinOrchestrationTemplate[] = [
     name: '并行汇总',
     summary: '多个人员同时发散，再由一个人员汇总成单一结论。',
     structure: '并行发散 -> 汇总',
+    defaultTask: '请从用户价值、成本风险、增长传播三个视角评估“是否要上线团队共享知识库”，并汇总成优先级明确的建议。',
     capabilities: ['parallel', 'merge'],
     maxNodeExecutions: 20,
     roles: [
@@ -98,6 +101,7 @@ export const BUILTIN_ORCHESTRATION_TEMPLATES: BuiltinOrchestrationTemplate[] = [
     name: '审核把关',
     summary: '先执行，再审核；不通过时停止，避免低质量结果继续流转。',
     structure: '执行 -> 审核',
+    defaultTask: '请完成一份“新用户引导流程优化建议”，并让审核员检查是否结构清晰、细节充分、可以执行。',
     capabilities: ['sequential', 'review'],
     maxNodeExecutions: 20,
     roles: [
@@ -116,6 +120,7 @@ export const BUILTIN_ORCHESTRATION_TEMPLATES: BuiltinOrchestrationTemplate[] = [
     name: '循环审核',
     summary: '审核不通过就回到修改节点，直到通过或达到上限。',
     structure: '产出 -> 修改 -> 审核，不通过回修改',
+    defaultTask: '请产出一篇面向新用户介绍 OpenTeam 编排功能的发布文案，审核不通过时根据反馈修改到可以发布。',
     capabilities: ['sequential', 'review', 'loop'],
     maxNodeExecutions: 30,
     roles: [
@@ -139,6 +144,7 @@ export const BUILTIN_ORCHESTRATION_TEMPLATES: BuiltinOrchestrationTemplate[] = [
     name: '产品方案评审',
     summary: '产品先拆方案，工程评估成本，审核员决定是否回炉。',
     structure: '产品拆解 -> 工程评估 -> 审核，不通过回产品',
+    defaultTask: '请评审“为 OpenTeam 增加内置编排模板”的产品方案，输出用户价值、实现成本、风险和上线建议。',
     capabilities: ['sequential', 'review', 'loop'],
     maxNodeExecutions: 30,
     roles: [
@@ -163,6 +169,7 @@ export const BUILTIN_ORCHESTRATION_TEMPLATES: BuiltinOrchestrationTemplate[] = [
     name: '内容创作审核',
     summary: '先定选题，再写正文，编辑审核不通过则回到写作。',
     structure: '选题 -> 写作 -> 编辑审核，不通过回写作',
+    defaultTask: '请为 OpenTeam 的编排模板功能创作一篇公众号短文，从选题到正文再到编辑审核，直到可以发布。',
     capabilities: ['sequential', 'review', 'loop'],
     maxNodeExecutions: 30,
     roles: [
@@ -187,6 +194,7 @@ export const BUILTIN_ORCHESTRATION_TEMPLATES: BuiltinOrchestrationTemplate[] = [
     name: '竞品分析报告',
     summary: '多个视角并行分析竞品，再汇总成策略建议。',
     structure: '并行分析 -> 报告汇总 -> 质量审核',
+    defaultTask: '请分析三款团队协作或 AI Agent 产品的编排能力，形成包含差异、机会和行动建议的竞品分析报告。',
     capabilities: ['parallel', 'merge', 'review'],
     maxNodeExecutions: 25,
     roles: [

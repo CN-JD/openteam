@@ -31,6 +31,13 @@ describe('built-in orchestration templates', () => {
     }
   })
 
+  it('provides a runnable default task for every template', () => {
+    for (const template of BUILTIN_ORCHESTRATION_TEMPLATES) {
+      expect(template.defaultTask.trim().length, template.id).toBeGreaterThan(12)
+      expect(template.defaultTask, template.id).not.toContain('例如')
+    }
+  })
+
   it('includes concrete examples for parallel work and review loops', () => {
     const parallel = BUILTIN_ORCHESTRATION_TEMPLATES.find(template => template.id === 'parallel-merge')
     const loop = BUILTIN_ORCHESTRATION_TEMPLATES.find(template => template.id === 'review-loop')

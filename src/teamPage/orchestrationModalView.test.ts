@@ -264,6 +264,43 @@ describe('orchestration modal view', () => {
     expect(savePayload.flow?.stages.find(stage => stage.kind === 'review')?.review?.instructions).toContain('通过')
   })
 
+  it('fills an empty task from the selected built-in template so it can run immediately', async () => {
+    const harness = createHarness()
+    const createdRoles: GroupRole[] = [
+      { id: 'role-angle-a', chatId: 'chat-1', name: '视角A', createdBy: 'orchestration-template', chatSite: 'deepseek', status: 'pending', contextCursor: 0, createdAt: 2, updatedAt: 2 },
+      { id: 'role-angle-b', chatId: 'chat-1', name: '视角B', createdBy: 'orchestration-template', chatSite: 'deepseek', status: 'pending', contextCursor: 0, createdAt: 2, updatedAt: 2 },
+      { id: 'role-angle-c', chatId: 'chat-1', name: '视角C', createdBy: 'orchestration-template', chatSite: 'deepseek', status: 'pending', contextCursor: 0, createdAt: 2, updatedAt: 2 },
+      { id: 'role-merger', chatId: 'chat-1', name: '汇总者', createdBy: 'orchestration-template', chatSite: 'deepseek', status: 'pending', contextCursor: 0, createdAt: 2, updatedAt: 2 },
+    ]
+    harness.sendRuntimeMessage.mockResolvedValue({ ok: true, store: storeWithRoles(harness.store, createdRoles), roles: createdRoles })
+    const view = createView(harness)
+    view.registerOrchestrationEvents()
+    harness.refs.openOrchestrationEl.click()
+
+    harness.refs.openOrchestrationTemplateEl.click()
+    harness.refs.orchestrationTemplateContentEl.querySelector<HTMLButtonElement>('[data-template-id="parallel-merge"]')?.click()
+    await flushAsync()
+
+    expect(harness.refs.orchestrationTaskEl.value).toBe('请从用户价值、成本风险、增长传播三个视角评估“是否要上线团队共享知识库”，并汇总成优先级明确的建议。')
+    harness.refs.runOrchestrationEl.click()
+    await flushAsync()
+    expect(harness.runCommand).toHaveBeenCalledWith('GROUP_ORCHESTRATION_RUN', expect.objectContaining({ task: harness.refs.orchestrationTaskEl.value }))
+  })
+
+  it('keeps a user-written task when applying a built-in template', async () => {
+    const harness = createHarness()
+    const view = createView(harness)
+    view.registerOrchestrationEvents()
+    harness.refs.openOrchestrationEl.click()
+    harness.refs.orchestrationTaskEl.value = '评估我们自己的 OpenTeam 模板体验。'
+
+    harness.refs.openOrchestrationTemplateEl.click()
+    harness.refs.orchestrationTemplateContentEl.querySelector<HTMLButtonElement>('[data-template-id="parallel-merge"]')?.click()
+    await flushAsync()
+
+    expect(harness.refs.orchestrationTaskEl.value).toBe('评估我们自己的 OpenTeam 模板体验。')
+  })
+
   it('removes previously template-created roles before applying another built-in template', async () => {
     const harness = createHarness()
     const loopRoles: GroupRole[] = [

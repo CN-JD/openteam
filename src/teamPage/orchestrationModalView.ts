@@ -649,9 +649,11 @@ export function createOrchestrationModalView(deps: OrchestrationModalDependencie
         }]
       })
       const arranged = arrangeOrchestrationGraph(stages, edges)
+      const task = deps.orchestrationTaskEl.value.trim() || template.defaultTask
+      deps.orchestrationTaskEl.value = task
       draft = {
         flowId: draft.flowId,
-        task: deps.orchestrationTaskEl.value.trim(),
+        task,
         stages: arranged.stages,
         graphEdges: arranged.edges,
         autoPlanHistory: [],
