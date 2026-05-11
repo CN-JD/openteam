@@ -4344,11 +4344,11 @@ select:focus {
 }
 
 :root[data-theme="light"] .modal-backdrop {
-  background: #ffffff;
+  background: rgba(17, 24, 39, 0.24);
 }
 
 :root[data-theme="light"] .modal-backdrop-secondary {
-  background: #ffffff;
+  background: rgba(17, 24, 39, 0.18);
 }
 
 :root[data-theme="light"] .modal-close {

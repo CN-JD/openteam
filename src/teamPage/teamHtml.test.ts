@@ -92,7 +92,6 @@ describe('team.html chat creation UI', () => {
       '.workspace',
       '.chat-header',
       '.all-notes-list',
-      '.modal-backdrop',
       '#iframe-host',
       '.orchestration-workspace',
       '.orchestration-task-strip',
@@ -101,6 +100,15 @@ describe('team.html chat creation UI', () => {
     ]) {
       expect(html).toMatch(new RegExp(`:root\\[data-theme="light"\\] ${selector.replace('.', '\\.')}\\s*{[^}]*background:\\s*#ffffff;`, 's'))
     }
+  })
+
+  it('keeps light theme modal backdrops translucent and blurred instead of white-screening the page', () => {
+    const html = readTeamDocument()
+
+    expect(html).toMatch(/\.modal-backdrop\s*{[^}]*backdrop-filter:\s*blur\(10px\);/s)
+    expect(html).toMatch(/:root\[data-theme="light"\] \.modal-backdrop\s*{[^}]*background:\s*rgba\(17,\s*24,\s*39,\s*0\.24\);/s)
+    expect(html).toMatch(/:root\[data-theme="light"\] \.modal-backdrop-secondary\s*{[^}]*background:\s*rgba\(17,\s*24,\s*39,\s*0\.18\);/s)
+    expect(html).not.toMatch(/:root\[data-theme="light"\] \.modal-backdrop\s*{[^}]*background:\s*#ffffff;/s)
   })
 
   it('keeps light theme automatic orchestration history readable instead of disabled-looking', () => {
