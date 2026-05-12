@@ -68,6 +68,8 @@ const MAX_CARD_HEIGHT = 620
 const VIEWPORT_PADDING = 8
 
 export function createOrchestrationStatusView(deps: OrchestrationStatusViewDependencies): OrchestrationStatusView {
+  const pendingRetryActions = new Set<string>()
+
   function renderOrchestrationStatus(): HTMLElement | undefined {
     const chat = deps.getCurrentChat()
     if (!chat) return undefined
@@ -264,8 +266,16 @@ export function createOrchestrationStatusView(deps: OrchestrationStatusViewDepen
   }
 
   function retryAction(chat: GroupChat, current: OrchestrationStageRun, type: string, payload: Record<string, unknown>): void {
+    const actionKey = retryActionKey(chat, type, payload)
+    if (pendingRetryActions.has(actionKey)) return
+    pendingRetryActions.add(actionKey)
     runCommandWithReconnect(deps, { chat, roles: getStageRoles(current), type, payload, preconnectAll: true })
       .catch(error => deps.showError(error instanceof Error ? error.message : String(error)))
+      .finally(() => pendingRetryActions.delete(actionKey))
+  }
+
+  function retryActionKey(chat: GroupChat, type: string, payload: Record<string, unknown>): string {
+    return `${chat.id}:${type}:${String(payload.stageId ?? '')}`
   }
 
   function getResumeRoles(run: OrchestrationRun, flow: OrchestrationFlow): GroupRole[] {

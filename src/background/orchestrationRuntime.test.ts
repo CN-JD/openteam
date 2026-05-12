@@ -64,7 +64,7 @@ async function setupRuntime(
       },
     },
   })
-  const { startOrchestrationRun } = await import('./orchestrationRuntime')
+  const { retryOrchestrationStage, startOrchestrationRun } = await import('./orchestrationRuntime')
   const sendPrompt = vi.fn(async (): Promise<void> => undefined)
   let idSeq = 0
   const deps: import('./orchestrationRuntime').OrchestrationRuntimeDependencies = {
@@ -77,7 +77,7 @@ async function setupRuntime(
     sendPrompt,
     ...overrides,
   }
-  return { deps, getStore: loadStore, sendPrompt, startOrchestrationRun }
+  return { deps, getStore: loadStore, retryOrchestrationStage, sendPrompt, startOrchestrationRun }
 }
 
 describe('orchestration runtime', () => {
@@ -592,6 +592,86 @@ describe('orchestration runtime', () => {
     expect(retriedStore.orchestrationRunsById[started.run.id].stageRuns.map(stageRun => `${stageRun.status}:${stageRun.stageId}`)).toEqual(['completed:stage-a', 'running:stage-b'])
   })
 
+  it('ignores a duplicate retry while the failed node is being restarted', async () => {
+    const store = makeStore(['role-a', 'role-b'])
+    store.orchestrationFlowsById['flow-1'] = makeFlow('chat-1', [
+      { id: 'stage-a', kind: 'roles', name: 'A', roleIds: ['role-a'] },
+      { id: 'stage-b', kind: 'roles', name: 'B', roleIds: ['role-b'] },
+    ])
+    store.messagesById['msg-task'] = {
+      id: 'msg-task',
+      chatId: 'chat-1',
+      seq: 1,
+      type: 'user',
+      content: 'Ship the plan',
+      orchestrationRunId: 'run-1',
+      orchestrationKind: 'task',
+      createdAt: 1,
+      status: 'received',
+    }
+    store.chatsById['chat-1'].messageIds.push('msg-task')
+    store.chatsById['chat-1'].nextMessageSeq = 2
+    store.chatsById['chat-1'].status = 'error'
+    store.orchestrationRunsById['run-1'] = {
+      id: 'run-1',
+      chatId: 'chat-1',
+      flowId: 'flow-1',
+      status: 'error',
+      currentRound: 1,
+      maxRounds: 1,
+      stageRuns: [
+        {
+          stageId: 'stage-a',
+          stageIndex: 0,
+          kind: 'roles',
+          round: 1,
+          status: 'completed',
+          roleRuns: { 'role-a': { roleId: 'role-a', status: 'completed', messageId: 'msg-a', startedAt: 1, completedAt: 1 } },
+          startedAt: 1,
+          completedAt: 1,
+        },
+        {
+          stageId: 'stage-b',
+          stageIndex: 1,
+          kind: 'roles',
+          round: 1,
+          status: 'error',
+          roleRuns: { 'role-b': { roleId: 'role-b', status: 'error', messageId: 'msg-b', error: 'send failed', startedAt: 1, completedAt: 1 } },
+          startedAt: 1,
+          completedAt: 1,
+        },
+      ],
+      error: 'send failed',
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    store.activeOrchestrationRunIdByChatId['chat-1'] = 'run-1'
+    const releaseBroadcasts: Array<() => void> = []
+    let broadcastCount = 0
+    const harness = await setupRuntime(store, {
+      broadcastStoreUpdated: vi.fn(() => {
+        broadcastCount += 1
+        if (broadcastCount === 1) return new Promise<void>(resolve => releaseBroadcasts.push(resolve))
+      }),
+      runtimeFrames: {
+        getByRole: vi.fn((chatId, roleId) => ({ chatId, roleId, tabId: 102, frameId: 2, ready: true, lastSeenAt: 1 })),
+      },
+    })
+
+    const firstRetry = harness.retryOrchestrationStage(harness.deps, 'chat-1', 'stage-b')
+    await waitForCondition(() => releaseBroadcasts.length === 1)
+
+    const duplicate = await harness.retryOrchestrationStage(harness.deps, 'chat-1', 'stage-b')
+    expect(duplicate.store.orchestrationRunsById['run-1'].stageRuns.map(stageRun => `${stageRun.status}:${stageRun.stageId}`)).toEqual(['completed:stage-a', 'pending:stage-b'])
+
+    releaseBroadcasts.splice(0).forEach(resolve => resolve())
+    await firstRetry
+
+    expect(harness.sendPrompt).toHaveBeenCalledTimes(1)
+    const finalStore = await harness.getStore()
+    expect(finalStore.orchestrationRunsById['run-1'].stageRuns.map(stageRun => `${stageRun.status}:${stageRun.stageId}`)).toEqual(['completed:stage-a', 'running:stage-b'])
+  })
+
   it('keeps invalid review JSON in error until retry or stop', async () => {
     const store = makeStore(['worker', 'reviewer'])
     store.orchestrationFlowsById['flow-1'] = makeFlow('chat-1', [
@@ -744,6 +824,14 @@ async function waitForPromptCallCount(mock: ReturnType<typeof vi.fn>, count: num
     await new Promise(resolve => setTimeout(resolve, 0))
   }
   expect(promptCalls(mock)).toHaveLength(count)
+}
+
+async function waitForCondition(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (condition()) return
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+  expect(condition()).toBe(true)
 }
 
 function latestUserMessage(store: OpenTeamStore, chatId: string) {

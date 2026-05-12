@@ -303,16 +303,21 @@ export async function retryOrchestrationStage(deps: OrchestrationRuntimeDependen
   const prepared = await mutateStore(store => {
     const chat = requireChat(store, chatId)
     const run = requireActiveRun(store, chat)
+    const restartingStageRun = findRestartingStageRun(run, stageId)
+    if (restartingStageRun) return { runId: run.id, stageIndex: restartingStageRun.stageIndex, alreadyRestarting: true }
     const stageRun = findRetryableStageRun(run, stageId)
     if (!stageRun) throw new Error('找不到可重试的编排节点')
-    removeStageRunAndFollowing(run, stageRun)
+    removeStageRunsAfter(run, stageRun)
+    markStageRunRestarting(stageRun, timestamp)
     run.status = 'running'
     delete run.error
+    delete run.completedAt
     run.updatedAt = timestamp
     chat.status = 'running'
     chat.updatedAt = timestamp
-    return { runId: run.id, stageIndex: stageRun.stageIndex }
+    return { runId: run.id, stageIndex: stageRun.stageIndex, alreadyRestarting: false }
   })
+  if (prepared.result.alreadyRestarting) return { store: prepared.store }
   await deps.broadcastStoreUpdated(prepared.store)
   const started = await startStage(deps, prepared.result.runId, prepared.result.stageIndex)
   return { store: started.store }
@@ -389,6 +394,7 @@ async function startStage(deps: OrchestrationRuntimeDependencies, runId: string,
       }
     }
 
+    removePendingStageRun(run, stageIndex)
     const promptMessage = createStagePromptMessage(deps, chat, run, stage, stageIndex, taskMessage.content, timestamp)
     promptMessage.targetRoleIds = targetRoleIds
     promptMessage.mentionedRoleIds = targetRoleIds
@@ -911,9 +917,37 @@ function findRetryableStageRun(run: OrchestrationRun, stageId?: string): Orchest
   return candidate
 }
 
+function findRestartingStageRun(run: OrchestrationRun, stageId?: string): OrchestrationStageRun | undefined {
+  const candidate = stageId ? [...run.stageRuns].reverse().find(stageRun => stageRun.stageId === stageId) : currentStageRun(run)
+  return candidate?.status === 'pending' ? candidate : undefined
+}
+
 function removeStageRunAndFollowing(run: OrchestrationRun, stageRun: OrchestrationStageRun): void {
   const index = run.stageRuns.indexOf(stageRun)
   if (index >= 0) run.stageRuns.splice(index)
+}
+
+function removeStageRunsAfter(run: OrchestrationRun, stageRun: OrchestrationStageRun): void {
+  const index = run.stageRuns.indexOf(stageRun)
+  if (index >= 0) run.stageRuns.splice(index + 1)
+}
+
+function markStageRunRestarting(stageRun: OrchestrationStageRun, timestamp: number): void {
+  stageRun.status = 'pending'
+  stageRun.startedAt = timestamp
+  delete stageRun.completedAt
+  for (const roleRun of Object.values(stageRun.roleRuns)) {
+    roleRun.status = 'pending'
+    roleRun.startedAt = timestamp
+    delete roleRun.completedAt
+    delete roleRun.error
+    delete roleRun.messageId
+  }
+}
+
+function removePendingStageRun(run: OrchestrationRun, stageIndex: number): void {
+  const index = run.stageRuns.findIndex(stageRun => stageRun.stageIndex === stageIndex && stageRun.status === 'pending')
+  if (index >= 0) run.stageRuns.splice(index, 1)
 }
 
 function firstReviewerRoleId(stage: OrchestrationStage): string {

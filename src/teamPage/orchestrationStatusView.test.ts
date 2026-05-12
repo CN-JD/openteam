@@ -344,6 +344,39 @@ describe('orchestration status view', () => {
     expect(runCommand).toHaveBeenCalledWith('GROUP_ORCHESTRATION_RESUME', { chatId: fixture.chat.id, runId: fixture.run.id })
   })
 
+  it('does not dispatch duplicate retry commands while a retry is pending', async () => {
+    const fixture = baseFixture('error')
+    const reconnectRolesForSend = vi.fn(async () => undefined)
+    let resolveRetry: (() => void) | undefined
+    const runCommand = vi.fn(() => new Promise<void>(resolve => {
+      resolveRetry = resolve
+    }))
+    const node = createOrchestrationStatusView({
+      getStore: () => fixture.store,
+      getCurrentChat: () => fixture.chat,
+      getCurrentRoles: () => fixture.roles,
+      reconnectRolesForSend,
+      runCommand,
+      showError: vi.fn(),
+    }).renderOrchestrationStatus()
+    const retryButton = findButton(node, '重发')
+
+    retryButton?.click()
+    retryButton?.click()
+    await flushAsync()
+
+    expect(reconnectRolesForSend).toHaveBeenCalledTimes(1)
+    expect(runCommand).toHaveBeenCalledTimes(1)
+    expect(runCommand).toHaveBeenCalledWith('GROUP_ORCHESTRATION_RETRY_STAGE', { chatId: fixture.chat.id, stageId: 'stage-1' })
+
+    resolveRetry?.()
+    await flushAsync()
+    retryButton?.click()
+    await flushAsync()
+
+    expect(runCommand).toHaveBeenCalledTimes(2)
+  })
+
   it('collapses into a compact floating launcher and persists the local preference', () => {
     const fixture = baseFixture('running')
     const view = createOrchestrationStatusView({
