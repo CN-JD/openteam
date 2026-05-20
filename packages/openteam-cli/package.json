@@ -1,0 +1,21 @@
+{
+  "name": "@openteam/cli",
+  "version": "0.1.0",
+  "description": "OpenTeam local CLI for agent-controlled group chats",
+  "type": "module",
+  "private": false,
+  "bin": {
+    "openteamcli": "./openteamcli.mjs"
+  },
+  "files": [
+    "openteamcli.mjs",
+    "openteam-daemon.mjs",
+    "skills"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

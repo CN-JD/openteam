@@ -161,16 +161,24 @@ openteamcli
 CLI source layout:
 
 ```text
-cli/openteamcli.mjs
-cli/openteam-daemon.mjs
+packages/openteam-cli/openteamcli.mjs
+packages/openteam-cli/openteam-daemon.mjs
+packages/openteam-cli/skills/SKILL.md
 ```
 
 Development install:
 
 ```bash
+cd packages/openteam-cli
 npm install -g .
 # or
 npm link
+```
+
+Publish install:
+
+```bash
+npm install -g @openteam/cli
 ```
 
 After installation, skills and external agents should call the global command directly:
@@ -347,7 +355,7 @@ openteam-control
 Skill file:
 
 ```text
-skills/SKILL.md
+packages/openteam-cli/skills/SKILL.md
 ```
 
 Skill responsibility:
@@ -564,7 +572,7 @@ This improves `task.wait` and `task.read`. If we want a no-migration first versi
 
 ## Daemon Design
 
-The daemon should be a small Node process packaged with `openteamcli` under `cli/openteam-daemon.mjs`.
+The daemon should be a small Node process packaged with `openteamcli` under `packages/openteam-cli/openteam-daemon.mjs`.
 
 Responsibilities:
 
@@ -749,7 +757,7 @@ MVP should support:
 - `task.wait`
 - `task.read`
 - `run.createAndPost`
-- `skills/SKILL.md` skill draft
+- `packages/openteam-cli/skills/SKILL.md` skill draft
 
 MVP should not support:
 
@@ -858,7 +866,7 @@ Add:
 Add local skill:
 
 ```text
-skills/SKILL.md
+packages/openteam-cli/skills/SKILL.md
 ```
 
 The skill should include examples for:
@@ -911,12 +919,11 @@ npm run build
 
 ## Open Questions
 
-- Should `openteamcli` live in the OpenTeam repo or a separate package?
 - Should first version add `GROUP_MESSAGE_SEND_TARGETED`, or use mention synthesis first?
 - Should `task.wait` add `sourceMessageId` to assistant messages immediately?
 - Should control port be fixed at `19826`, or configured in UI?
 - Should CLI auto-start daemon, like OpenCLI, or require explicit `daemon start`?
-- Should the first public skill live inside this repo or in the user's Codex skills directory?
+- Should `openteamcli skill install` copy `packages/openteam-cli/skills/SKILL.md` into each supported agent's local skills directory?
 
 ## Recommendation
 

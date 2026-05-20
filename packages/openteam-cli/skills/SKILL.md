@@ -7,15 +7,22 @@ description: 当智能体需要通过本机 openteamcli 控制 OpenTeam：创建
 
 ## 概览
 
-OpenTeam 通过本仓库 `cli/` 目录里的 `openteamcli` 命令和本地 daemon 控制。不要直接点击浏览器界面，也不要绕过本地控制协议去调用 Chrome 扩展内部 API。
+OpenTeam 通过已安装的 `openteamcli` 命令和本地 daemon 控制。不要直接点击浏览器界面，也不要绕过本地控制协议去调用 Chrome 扩展内部 API。
 
 当任务需要多个 AI 角色在 OpenTeam 里讨论、评审、批判、头脑风暴、比较方案，或分别给出独立观点时，使用这个 skill。
 
 ## 本机命令要求
 
-默认直接调用已安装到本机 PATH 里的 `openteamcli`。如果命令不存在，请提示用户在 OpenTeam 仓库里执行开发期安装：
+默认直接调用已安装到本机 PATH 里的 `openteamcli`。如果命令不存在，请提示用户安装 CLI 包：
 
 ```bash
+npm install -g @openteam/cli
+```
+
+开发期可以在 OpenTeam 仓库里执行：
+
+```bash
+cd packages/openteam-cli
 npm install -g .
 ```
 

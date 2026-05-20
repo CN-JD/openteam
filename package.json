@@ -2,13 +2,6 @@
   "name": "openteam",
   "version": "1.0.0",
   "private": true,
-  "bin": {
-    "openteamcli": "./cli/openteamcli.mjs"
-  },
-  "files": [
-    "cli",
-    "skills"
-  ],
   "scripts": {
     "dev": "vite build --watch --mode development",
     "build": "vite build",
@@ -18,7 +11,7 @@
     "e2e": "npm run test:e2e && npm run e2e:extension",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm test && npm run test:e2e && npm run build",
-    "openteamcli": "node cli/openteamcli.mjs"
+    "openteamcli": "node packages/openteam-cli/openteamcli.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.268",
