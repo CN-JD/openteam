@@ -139,6 +139,7 @@ describe('role template utilities', () => {
 
   it('creates group roles from built-in templates without storing them as custom templates', () => {
     const store = createDefaultStore()
+    store.settings.language = 'zh-CN'
     store.chatsById['chat-1'] = makeChat('chat-1')
 
     const roles = createGroupRolesBatch(store, 'chat-1', [

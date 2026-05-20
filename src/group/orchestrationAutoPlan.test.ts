@@ -114,6 +114,7 @@ describe('orchestration auto plan', () => {
 
   it('builds a prompt that tells the planner to use existing roles first and choose from supported chat sites', () => {
     const store = createDefaultStore()
+    store.settings.language = 'zh-CN'
     const role: GroupRole = { id: 'role-1', chatId: 'chat-1', name: '产品经理', chatSite: 'chatgpt', description: '做产品', status: 'ready', contextCursor: 0, createdAt: 1, updatedAt: 1 }
     const prompt = buildAutoOrchestrationPrompt({ task: '做一个方案', existingRoles: [role], store })
 
@@ -142,6 +143,7 @@ describe('orchestration auto plan', () => {
 
   it('builds a modification prompt with task, instruction, current flow and planner history separated', () => {
     const store = createDefaultStore()
+    store.settings.language = 'zh-CN'
     const role: GroupRole = { id: 'role-1', chatId: 'chat-1', name: '写手', createdBy: 'orchestration-auto', chatSite: 'deepseek', systemPrompt: '写作人设', status: 'ready', contextCursor: 0, createdAt: 1, updatedAt: 1 }
     const currentFlow: OrchestrationFlow = {
       id: 'flow-1',

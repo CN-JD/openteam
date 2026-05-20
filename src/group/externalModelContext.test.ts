@@ -50,6 +50,7 @@ describe('external model context', () => {
 
   it('compresses older context when the prompt exceeds the context budget', () => {
     const store = createDefaultStore()
+    store.settings.language = 'zh-CN'
     store.settings.maxContextChars = 360
     const chat = makeChat('collaborative')
     const engineer = makeRole('role-engineer', '工程师')
