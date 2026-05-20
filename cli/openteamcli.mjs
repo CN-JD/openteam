@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_PORT, DEFAULT_TOKEN_PATH, readOrCreateToken } from './openteam-daemon.mjs'
@@ -308,20 +308,29 @@ function writeJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
 
-function help() {
+export function help() {
   return {
     ok: true,
     commands: [
-      'openteamctl doctor',
-      'openteamctl daemon start|status|stop|restart|logs',
-      'openteamctl chat list|get|create|activate|initialize',
-      'openteamctl role batch-add --chat <chatId> --file roles.json',
-      'openteamctl task post|wait|read',
-      'openteamctl run create-and-post --file task.json --wait',
+      'openteamcli doctor',
+      'openteamcli daemon start|status|stop|restart|logs',
+      'openteamcli chat list|get|create|activate|initialize',
+      'openteamcli role batch-add --chat <chatId> --file roles.json',
+      'openteamcli task post|wait|read',
+      'openteamcli run create-and-post --file task.json --wait',
     ],
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+function isMainModule(importMetaUrl, argvPath) {
+  if (!argvPath) return false
+  try {
+    return realpathSync(fileURLToPath(importMetaUrl)) === realpathSync(argvPath)
+  } catch {
+    return fileURLToPath(importMetaUrl) === argvPath
+  }
+}
+
+if (isMainModule(import.meta.url, process.argv[1])) {
   main(process.argv.slice(2))
 }

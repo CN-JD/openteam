@@ -765,7 +765,7 @@
             <div class="flow" aria-label="OpenTeam 智能体控制架构">
               <div class="flow-node primary">
                 <strong>外部智能体</strong>
-                <span>读取 openteam-control 技能，运行 openteamctl。</span>
+                <span>读取 openteam-control 技能，通过 openteamcli 运行本机控制命令。</span>
               </div>
               <div class="arrow">-&gt;</div>
               <div class="flow-node">
@@ -781,7 +781,7 @@
           </div>
           <pre><code>外部智能体
   读取 openteam-control 技能
-  运行 openteamctl
+  运行 openteamcli
         |
         | HTTP 127.0.0.1:&lt;port&gt;
         v
@@ -889,19 +889,19 @@ Content-Type: application/json</code></pre>
           <div class="section-header">
             <div>
               <span class="section-kicker">五、命令行功能</span>
-              <h2><code>openteamctl</code> 是智能体的主要入口</h2>
+              <h2><code>openteamcli</code> 是智能体的主要入口</h2>
             </div>
           </div>
-          <p class="lead">命令行工具默认输出 JSON，方便智能体读取。人类友好的表格输出可以后续再加。</p>
+          <p class="lead">命令行工具默认输出 JSON，方便智能体读取。CLI 与本地守护进程源码都放在 <code>cli/</code> 目录：<code>cli/openteamcli.mjs</code> 和 <code>cli/openteam-daemon.mjs</code>。开发期可以用 <code>npm install -g .</code> 或 <code>npm link</code> 安装，然后 skill 和外部智能体直接调用 <code>openteamcli</code>。人类友好的表格输出可以后续再加。</p>
           <div class="grid two">
             <div class="card">
               <h3>核心命令</h3>
-              <pre><code>openteamctl doctor
-openteamctl daemon status
-openteamctl daemon start
-openteamctl daemon stop
-openteamctl daemon restart
-openteamctl daemon logs</code></pre>
+              <pre><code>openteamcli doctor
+openteamcli daemon status
+openteamcli daemon start
+openteamcli daemon stop
+openteamcli daemon restart
+openteamcli daemon logs</code></pre>
             </div>
             <div class="card">
               <h3><code>doctor</code> 检查项</h3>
@@ -917,19 +917,19 @@ openteamctl daemon logs</code></pre>
           </div>
 
           <h3>群聊命令</h3>
-          <pre><code>openteamctl chat list
-openteamctl chat get &lt;chatId&gt;
-openteamctl chat create --name &lt;name&gt; --mode independent|collaborative
-openteamctl chat delete &lt;chatId&gt;
-openteamctl chat activate &lt;chatId&gt;</code></pre>
+          <pre><code>openteamcli chat list
+openteamcli chat get &lt;chatId&gt;
+openteamcli chat create --name &lt;name&gt; --mode independent|collaborative
+openteamcli chat delete &lt;chatId&gt;
+openteamcli chat activate &lt;chatId&gt;</code></pre>
           <p><code>chat activate</code> 只负责切换当前群聊并让 team 页面挂载相关 iframe，不发布任务。</p>
 
           <h3>人员命令</h3>
-          <pre><code>openteamctl role list --chat &lt;chatId&gt;
-openteamctl role add --chat &lt;chatId&gt; --name &lt;name&gt; --site claude --prompt &lt;text&gt;
-openteamctl role batch-add --chat &lt;chatId&gt; --file roles.json
-openteamctl role recover --chat &lt;chatId&gt; --role &lt;roleId&gt;
-openteamctl role wait-ready --chat &lt;chatId&gt; --timeout 120000</code></pre>
+          <pre><code>openteamcli role list --chat &lt;chatId&gt;
+openteamcli role add --chat &lt;chatId&gt; --name &lt;name&gt; --site claude --prompt &lt;text&gt;
+openteamcli role batch-add --chat &lt;chatId&gt; --file roles.json
+openteamcli role recover --chat &lt;chatId&gt; --role &lt;roleId&gt;
+openteamcli role wait-ready --chat &lt;chatId&gt; --timeout 120000</code></pre>
 
           <h4>人员输入结构</h4>
           <pre><code>type AgentRoleInput =
@@ -949,17 +949,17 @@ openteamctl role wait-ready --chat &lt;chatId&gt; --timeout 120000</code></pre>
     }</code></pre>
 
           <h3>任务命令</h3>
-          <pre><code>openteamctl task post --chat &lt;chatId&gt; --target all --content &lt;text&gt;
-openteamctl task post --chat &lt;chatId&gt; --target role:&lt;roleId&gt; --content &lt;text&gt;
-openteamctl task status --chat &lt;chatId&gt; --message &lt;messageId&gt;
-openteamctl task wait --chat &lt;chatId&gt; --message &lt;messageId&gt; --timeout 300000
-openteamctl task read --chat &lt;chatId&gt; --message &lt;messageId&gt;
-openteamctl task export --chat &lt;chatId&gt; --format md|json
-openteamctl task stop --chat &lt;chatId&gt; --role &lt;roleId&gt;
-openteamctl task retry --chat &lt;chatId&gt; --role &lt;roleId&gt; --message &lt;messageId&gt;</code></pre>
+          <pre><code>openteamcli task post --chat &lt;chatId&gt; --target all --content &lt;text&gt;
+openteamcli task post --chat &lt;chatId&gt; --target role:&lt;roleId&gt; --content &lt;text&gt;
+openteamcli task status --chat &lt;chatId&gt; --message &lt;messageId&gt;
+openteamcli task wait --chat &lt;chatId&gt; --message &lt;messageId&gt; --timeout 300000
+openteamcli task read --chat &lt;chatId&gt; --message &lt;messageId&gt;
+openteamcli task export --chat &lt;chatId&gt; --format md|json
+openteamcli task stop --chat &lt;chatId&gt; --role &lt;roleId&gt;
+openteamcli task retry --chat &lt;chatId&gt; --role &lt;roleId&gt; --message &lt;messageId&gt;</code></pre>
 
           <h3>一键运行命令</h3>
-          <pre><code>openteamctl run create-and-post --file task.json --wait</code></pre>
+          <pre><code>openteamcli run create-and-post --file task.json --wait</code></pre>
           <div class="note">这是智能体最常用的入口：输入一个 JSON，OpenTeam 完成创建群聊、添加人员、初始化、发布任务、等待回复和返回结果。</div>
 
           <h4>一键运行输入</h4>
@@ -1032,7 +1032,7 @@ openteamctl task retry --chat &lt;chatId&gt; --role &lt;roleId&gt; --message &lt
               <ul>
                 <li>告诉智能体什么时候应该使用 OpenTeam。</li>
                 <li>提供 <code>create-and-post</code> 的 JSON schema。</li>
-                <li>要求智能体先运行 <code>openteamctl doctor</code>。</li>
+                <li>要求智能体先运行 <code>openteamcli doctor</code>。</li>
                 <li>新任务优先使用一键命令。</li>
                 <li>已有群聊追问时使用 <code>task post</code>。</li>
                 <li>定义结构化错误码的恢复策略。</li>
@@ -1332,7 +1332,7 @@ agentControlPort: 19826</code></pre>
           <pre><code>{
   "code": "extension_not_connected",
   "message": "OpenTeam 扩展尚未连接到本地守护进程。",
-  "hint": "请打开已启用 OpenTeam 扩展的 Chrome，然后重新运行 openteamctl doctor。",
+  "hint": "请打开已启用 OpenTeam 扩展的 Chrome，然后重新运行 openteamcli doctor。",
   "recoverable": true
 }</code></pre>
           <div class="note">机器可读的 <code>code</code> 建议保持英文蛇形命名，便于脚本和智能体稳定判断。</div>
@@ -1349,7 +1349,7 @@ agentControlPort: 19826</code></pre>
             <div class="card accent-mint">
               <h3>最小可用版本支持</h3>
               <ul>
-                <li><code>openteamctl doctor</code></li>
+                <li><code>openteamcli doctor</code></li>
                 <li>本地守护进程的启动、停止和状态查询</li>
                 <li>扩展 WebSocket hello</li>
                 <li>控制开关</li>
@@ -1361,7 +1361,7 @@ agentControlPort: 19826</code></pre>
                 <li><code>task.wait</code></li>
                 <li><code>task.read</code></li>
                 <li><code>run.createAndPost</code></li>
-                <li><code>openteam-control</code> 技能草稿</li>
+                <li><code>skills/SKILL.md</code> 技能文档</li>
               </ul>
             </div>
             <div class="card accent-coral">
@@ -1423,7 +1423,7 @@ agentControlPort: 19826</code></pre>
             </div>
             <div class="phase">
               <h3>技能</h3>
-              <p>新增 <code>openteam-control</code> 技能，包含使用流程、schema、错误恢复和示例。</p>
+              <p>新增 <code>skills/SKILL.md</code> 技能文档，包含使用流程、schema、错误恢复和示例。</p>
             </div>
           </div>
         </section>
@@ -1470,7 +1470,7 @@ agentControlPort: 19826</code></pre>
                 <li>构建扩展。</li>
                 <li>加载未打包扩展。</li>
                 <li>启动本地守护进程。</li>
-                <li>验证 <code>openteamctl doctor</code>。</li>
+                <li>验证 <code>openteamcli doctor</code>。</li>
                 <li>创建带临时人员的群聊。</li>
                 <li>确认 chat 和 roles 写入 store。</li>
               </ul>
@@ -1489,7 +1489,7 @@ npm run build</code></pre>
             </div>
           </div>
           <details open>
-            <summary><code>openteamctl</code> 放在哪里？</summary>
+            <summary><code>openteamcli</code> 放在哪里？</summary>
             <div>
               <p>需要决定命令行工具是放在 OpenTeam 仓库里，还是拆成单独 package。最小可用版本可以先放在当前仓库，降低联调成本。</p>
             </div>

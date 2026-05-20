@@ -45,8 +45,8 @@ OpenTeam 当前已经有成熟的内部能力：
 
 ```text
 External Agent
-  reads openteam-control skill
-  runs openteamctl
+  读取 openteam-control 技能
+  运行 openteamcli
         |
         | HTTP 127.0.0.1:<port>
         v
@@ -155,7 +155,28 @@ The daemon keeps a `pending` map keyed by command id. It forwards command JSON t
 CLI name:
 
 ```text
-openteamctl
+openteamcli
+```
+
+CLI source layout:
+
+```text
+cli/openteamcli.mjs
+cli/openteam-daemon.mjs
+```
+
+Development install:
+
+```bash
+npm install -g .
+# or
+npm link
+```
+
+After installation, skills and external agents should call the global command directly:
+
+```bash
+openteamcli doctor
 ```
 
 Default output should be JSON. Human-friendly table output can come later.
@@ -163,12 +184,12 @@ Default output should be JSON. Human-friendly table output can come later.
 ### Core Commands
 
 ```bash
-openteamctl doctor
-openteamctl daemon status
-openteamctl daemon start
-openteamctl daemon stop
-openteamctl daemon restart
-openteamctl daemon logs
+openteamcli doctor
+openteamcli daemon status
+openteamcli daemon start
+openteamcli daemon stop
+openteamcli daemon restart
+openteamcli daemon logs
 ```
 
 `doctor` checks:
@@ -183,11 +204,11 @@ openteamctl daemon logs
 ### Chat Commands
 
 ```bash
-openteamctl chat list
-openteamctl chat get <chatId>
-openteamctl chat create --name <name> --mode independent|collaborative
-openteamctl chat delete <chatId>
-openteamctl chat activate <chatId>
+openteamcli chat list
+openteamcli chat get <chatId>
+openteamcli chat create --name <name> --mode independent|collaborative
+openteamcli chat delete <chatId>
+openteamcli chat activate <chatId>
 ```
 
 `chat activate` should make the target chat current and ask the team page to mount relevant iframes. It does not publish a task by itself.
@@ -195,11 +216,11 @@ openteamctl chat activate <chatId>
 ### Role Commands
 
 ```bash
-openteamctl role list --chat <chatId>
-openteamctl role add --chat <chatId> --name <name> --site claude --prompt <text>
-openteamctl role batch-add --chat <chatId> --file roles.json
-openteamctl role recover --chat <chatId> --role <roleId>
-openteamctl role wait-ready --chat <chatId> --timeout 120000
+openteamcli role list --chat <chatId>
+openteamcli role add --chat <chatId> --name <name> --site claude --prompt <text>
+openteamcli role batch-add --chat <chatId> --file roles.json
+openteamcli role recover --chat <chatId> --role <roleId>
+openteamcli role wait-ready --chat <chatId> --timeout 120000
 ```
 
 Role input supports two sources:
@@ -227,14 +248,14 @@ External API model roles can be added later. First version can focus on site-bac
 ### Task Commands
 
 ```bash
-openteamctl task post --chat <chatId> --target all --content <text>
-openteamctl task post --chat <chatId> --target role:<roleId> --content <text>
-openteamctl task status --chat <chatId> --message <messageId>
-openteamctl task wait --chat <chatId> --message <messageId> --timeout 300000
-openteamctl task read --chat <chatId> --message <messageId>
-openteamctl task export --chat <chatId> --format md|json
-openteamctl task stop --chat <chatId> --role <roleId>
-openteamctl task retry --chat <chatId> --role <roleId> --message <messageId>
+openteamcli task post --chat <chatId> --target all --content <text>
+openteamcli task post --chat <chatId> --target role:<roleId> --content <text>
+openteamcli task status --chat <chatId> --message <messageId>
+openteamcli task wait --chat <chatId> --message <messageId> --timeout 300000
+openteamcli task read --chat <chatId> --message <messageId>
+openteamcli task export --chat <chatId> --format md|json
+openteamcli task stop --chat <chatId> --role <roleId>
+openteamcli task retry --chat <chatId> --role <roleId> --message <messageId>
 ```
 
 For `task post`, CLI can accept `--target all` and convert it to raw content:
@@ -250,7 +271,7 @@ For a specific role, the extension should prefer role id targeting internally in
 This is the main command for agents:
 
 ```bash
-openteamctl run create-and-post --file task.json --wait
+openteamcli run create-and-post --file task.json --wait
 ```
 
 Input:
@@ -323,11 +344,17 @@ Skill name:
 openteam-control
 ```
 
+Skill file:
+
+```text
+skills/SKILL.md
+```
+
 Skill responsibility:
 
 - Teach agents when to use OpenTeam.
 - Provide the JSON schema for `create-and-post`.
-- Instruct agents to run `openteamctl doctor` first.
+- Instruct agents to run `openteamcli doctor` first.
 - Instruct agents to prefer one-shot `run create-and-post` for new tasks.
 - Instruct agents to use `task post` for follow-up questions in an existing chat.
 - Define recovery behavior from structured error codes.
@@ -338,17 +365,17 @@ The skill should not contain business logic that belongs in the extension. It sh
 
 Default workflow for a new task:
 
-1. Run `openteamctl doctor`.
+1. Run `openteamcli doctor`.
 2. Build `task.json`.
-3. Run `openteamctl run create-and-post --file task.json --wait`.
+3. Run `openteamcli run create-and-post --file task.json --wait`.
 4. If replies are returned, summarize them for the user.
-5. If timeout occurs, run `openteamctl task read --chat <chatId>` and report partial results.
+5. If timeout occurs, run `openteamcli task read --chat <chatId>` and report partial results.
 6. If a role is unavailable, recover or retry according to the error code.
 
 Follow-up workflow:
 
 1. Use the previous `chatId`.
-2. Run `openteamctl task post --chat <chatId> --target all --content ... --wait`.
+2. Run `openteamcli task post --chat <chatId> --target all --content ... --wait`.
 3. Read replies and summarize.
 
 ### Agent Capabilities
@@ -537,7 +564,7 @@ This improves `task.wait` and `task.read`. If we want a no-migration first versi
 
 ## Daemon Design
 
-The daemon should be a small Node process packaged with `openteamctl`.
+The daemon should be a small Node process packaged with `openteamcli` under `cli/openteam-daemon.mjs`.
 
 Responsibilities:
 
@@ -641,7 +668,7 @@ Required controls:
 - Daemon binds only to `127.0.0.1`.
 - HTTP commands require `X-OpenTeam: 1`.
 - HTTP commands require a local bearer token.
-- Token generated by `openteamctl daemon start` and stored in `~/.openteam/control-token`.
+- Token generated by `openteamcli daemon start` and stored in `~/.openteam/control-token`.
 - WebSocket accepts only Chrome extension origins.
 - Optional strict check for known extension id in production builds.
 - No CORS headers on command endpoints.
@@ -701,7 +728,7 @@ Each error should include a human hint. Example:
 {
   "code": "extension_not_connected",
   "message": "OpenTeam extension is not connected to the local daemon.",
-  "hint": "Open Chrome with the OpenTeam extension enabled, then run openteamctl doctor again.",
+  "hint": "Open Chrome with the OpenTeam extension enabled, then run openteamcli doctor again.",
   "recoverable": true
 }
 ```
@@ -710,7 +737,7 @@ Each error should include a human hint. Example:
 
 MVP should support:
 
-- `openteamctl doctor`
+- `openteamcli doctor`
 - daemon start/stop/status
 - extension WebSocket hello
 - control setting toggle
@@ -722,7 +749,7 @@ MVP should support:
 - `task.wait`
 - `task.read`
 - `run.createAndPost`
-- `openteam-control` skill draft
+- `skills/SKILL.md` skill draft
 
 MVP should not support:
 
@@ -752,8 +779,8 @@ Later phases can add:
 
 Add daemon package and CLI skeleton:
 
-- `openteamctl daemon start|stop|status`.
-- `openteamctl doctor`.
+- `openteamcli daemon start|stop|status`.
+- `openteamcli doctor`.
 - local token management.
 - HTTP `/ping`, `/status`, `/command`, `/shutdown`.
 - WebSocket `/ext`.
@@ -768,7 +795,7 @@ Add extension control client:
 Verification:
 
 ```bash
-openteamctl doctor
+openteamcli doctor
 ```
 
 Expected result: daemon and extension connected, no write command support yet.
@@ -831,9 +858,7 @@ Add:
 Add local skill:
 
 ```text
-openteam-control/
-  SKILL.md
-  references/request-schema.md
+skills/SKILL.md
 ```
 
 The skill should include examples for:
@@ -872,7 +897,7 @@ E2E smoke:
 - build extension.
 - load unpacked extension.
 - start daemon.
-- verify `openteamctl doctor`.
+- verify `openteamcli doctor`.
 - create a chat with temporary roles.
 - confirm chat and roles appear in store.
 
@@ -886,7 +911,7 @@ npm run build
 
 ## Open Questions
 
-- Should `openteamctl` live in the OpenTeam repo or a separate package?
+- Should `openteamcli` live in the OpenTeam repo or a separate package?
 - Should first version add `GROUP_MESSAGE_SEND_TARGETED`, or use mention synthesis first?
 - Should `task.wait` add `sourceMessageId` to assistant messages immediately?
 - Should control port be fixed at `19826`, or configured in UI?
@@ -904,4 +929,3 @@ create chat -> add roles -> activate/initialize -> post @all task -> wait/read r
 ```
 
 Defer full orchestration control until the transport, safety, idempotency, and ordinary task flow are solid.
-

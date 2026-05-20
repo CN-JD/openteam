@@ -1,7 +1,14 @@
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { buildCliRequest } from './openteamctl.mjs'
+import { buildCliRequest, help } from './openteamcli.mjs'
 
-describe('openteamctl command builder', () => {
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+describe('openteamcli command builder', () => {
   it('builds doctor and daemon commands', () => {
     expect(buildCliRequest(['doctor'])).toEqual({ kind: 'doctor' })
     expect(buildCliRequest(['daemon', 'status'])).toEqual({ kind: 'daemon-status' })
@@ -33,5 +40,34 @@ describe('openteamctl command builder', () => {
       file: 'task.json',
       wait: true,
     })
+  })
+
+  it('uses the openteamcli name in help output', () => {
+    expect(help()).toEqual({
+      ok: true,
+      commands: [
+        'openteamcli doctor',
+        'openteamcli daemon start|status|stop|restart|logs',
+        'openteamcli chat list|get|create|activate|initialize',
+        'openteamcli role batch-add --chat <chatId> --file roles.json',
+        'openteamcli task post|wait|read',
+        'openteamcli run create-and-post --file task.json --wait',
+      ],
+    })
+  })
+
+  it('runs when invoked through an npm-style bin symlink', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'openteamcli-bin-'))
+    const binPath = join(tempDir, 'openteamcli')
+    symlinkSync(resolve(__dirname, 'openteamcli.mjs'), binPath)
+
+    try {
+      const result = spawnSync(binPath, ['help'], { encoding: 'utf8' })
+
+      expect(result.status).toBe(0)
+      expect(result.stdout).toContain('openteamcli doctor')
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
   })
 })
