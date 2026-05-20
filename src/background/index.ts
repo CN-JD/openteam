@@ -139,8 +139,7 @@ const executeControlCommand = createControlActionExecutor({
   now,
 })
 
-console.info('[OpenTeam][control] background:createControlClient:before', {
-  at: new Date().toISOString(),
+log.info('control-client:create', {
   extensionId: getExtensionId(),
   extensionVersion: getExtensionVersion(),
 })
@@ -165,9 +164,7 @@ const controlClient = createControlClient({
 let controlClientInitialized = false
 
 function syncControlClient(): Promise<void> {
-  console.info('[OpenTeam][control] background:syncControlClient:start', {
-    at: new Date().toISOString(),
-  })
+  log.info('control-client:sync')
   return controlClient.sync()
 }
 
@@ -176,22 +173,15 @@ function initializeControlClient(): void {
   controlClientInitialized = true
   try {
     chrome.alarms?.create?.(CONTROL_KEEPALIVE_ALARM, { periodInMinutes: CONTROL_KEEPALIVE_PERIOD_MINUTES })
-    console.info('[OpenTeam][control] background:keepalive-alarm:scheduled', {
-      at: new Date().toISOString(),
+    log.info('control-client:keepalive-alarm-scheduled', {
       alarm: CONTROL_KEEPALIVE_ALARM,
       periodInMinutes: CONTROL_KEEPALIVE_PERIOD_MINUTES,
     })
   } catch (error) {
     logBackgroundFailure('control-client:keepalive-alarm-failed', error)
   }
-  console.info('[OpenTeam][control] background:initial-sync:scheduled', {
-    at: new Date().toISOString(),
-  })
+  log.info('control-client:initial-sync-scheduled')
   syncControlClient().catch(error => {
-    console.warn('[OpenTeam][control] background:initial-sync:failed', {
-      at: new Date().toISOString(),
-      error: errorReason(error),
-    })
     log.warn('control-client:initial-sync-failed', { error: errorReason(error) })
   })
 }
