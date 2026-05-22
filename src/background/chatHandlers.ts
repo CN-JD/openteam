@@ -76,6 +76,11 @@ export function createChatHandlers(deps: ChatHandlersDependencies): BackgroundMe
         patchKeys.push('description')
       }
 
+      if (patch.requireManualMention !== undefined) {
+        chat.requireManualMention = !!patch.requireManualMention
+        patchKeys.push('requireManualMention')
+      }
+
       chat.updatedAt = timestamp
       return { chat, patchKeys }
     })
@@ -202,6 +207,7 @@ function createChat(store: OpenTeamStore, message: RuntimeMessage, deps: ChatHan
     messageIds: [],
     nextMessageSeq: 1,
     status: 'initializing',
+    requireManualMention: false,
     createdAt: timestamp,
     updatedAt: timestamp,
   }
@@ -267,6 +273,7 @@ export function duplicateChat(store: OpenTeamStore, sourceChatId: unknown, deps:
     messageIds: [],
     nextMessageSeq: 1,
     status: sourceChat.roleIds.length > 0 ? 'initializing' : 'draft',
+    requireManualMention: sourceChat.requireManualMention,
     createdAt: timestamp,
     updatedAt: timestamp,
   }
