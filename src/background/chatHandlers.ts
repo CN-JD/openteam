@@ -311,6 +311,28 @@ export function duplicateChat(store: OpenTeamStore, sourceChatId: unknown, deps:
     roles.push(role)
   }
 
+  // 继承编排配置 (Fixes #14)
+  const sourceFlowIds = store.orchestrationFlowOrderByChatId[sourceChat.id] ?? []
+  if (sourceFlowIds.length > 0) {
+    const newFlowIds: string[] = []
+    for (const sourceFlowId of sourceFlowIds) {
+      const sourceFlow = store.orchestrationFlowsById[sourceFlowId]
+      if (!sourceFlow) continue
+
+      const newFlowId = deps.newId('flow')
+      const newFlow = {
+        ...sourceFlow,
+        id: newFlowId,
+        chatId: chat.id,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }
+      store.orchestrationFlowsById[newFlowId] = newFlow
+      newFlowIds.push(newFlowId)
+    }
+    store.orchestrationFlowOrderByChatId[chat.id] = newFlowIds
+  }
+
   return { chat, roles }
 }
 
