@@ -279,6 +279,17 @@ export function duplicateChat(store: OpenTeamStore, sourceChatId: unknown, deps:
   for (const sourceRoleId of sourceChat.roleIds) {
     const sourceRole = store.rolesById[sourceRoleId]
     if (!sourceRole) continue
+
+    // 计算当前角色实际生效的配置，实现配置快照
+    const template = sourceRole.templateId ? store.roleTemplatesById[sourceRole.templateId] : undefined
+    const effectiveModelSource = sourceRole.modelSource ?? template?.defaultModelSource ?? 'site'
+    const effectiveChatSite = effectiveModelSource === 'external' 
+      ? undefined 
+      : (sourceRole.chatSite ?? template?.defaultChatSite ?? store.settings.defaultChatSite)
+    const effectiveExternalModelId = effectiveModelSource === 'external' 
+      ? (sourceRole.externalModelId ?? template?.defaultExternalModelId) 
+      : undefined
+
     const role: GroupRole = {
       id: deps.newId('role'),
       chatId: chat.id,
@@ -287,9 +298,9 @@ export function duplicateChat(store: OpenTeamStore, sourceChatId: unknown, deps:
       ...(sourceRole.description ? { description: sourceRole.description } : {}),
       ...(sourceRole.systemPrompt ? { systemPrompt: sourceRole.systemPrompt } : {}),
       ...(sourceRole.avatarColor ? { avatarColor: sourceRole.avatarColor } : {}),
-      ...(sourceRole.modelSource ? { modelSource: sourceRole.modelSource } : {}),
-      ...(sourceRole.chatSite ? { chatSite: sourceRole.chatSite } : {}),
-      ...(sourceRole.externalModelId ? { externalModelId: sourceRole.externalModelId } : {}),
+      modelSource: effectiveModelSource,
+      chatSite: effectiveChatSite,
+      externalModelId: effectiveExternalModelId,
       status: 'pending',
       contextCursor: 0,
       createdAt: timestamp,
