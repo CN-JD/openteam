@@ -10,7 +10,7 @@ export function createReplyTimeout(timeoutMs: number, onTimeout: (messageId: str
         const timedOutMessageId = activeMessageId
         activeMessageId = undefined
         timer = undefined
-        if (timedOutMessageId) onTimeout(timedOutMessageId)
+        if (timedOutMessageId) onTimeout(timedOutMessageId, 'RESPONSE_NOT_FOUND')
       }, timeoutMs)
     },
 
