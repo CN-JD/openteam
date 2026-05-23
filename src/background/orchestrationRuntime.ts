@@ -13,6 +13,7 @@ import {
   type OrchestrationRun,
   type OrchestrationStage,
   type OrchestrationStageRun,
+  type OrchestrationStepStatus,
 } from '../group/types'
 import type { ExternalModelClient } from './externalModelClient'
 import type { PromptDelivery, PromptSender } from './promptDelivery'
@@ -141,7 +142,7 @@ export async function startOrchestrationRun(deps: OrchestrationRuntimeDependenci
   })
 
   if (!isTest) await deps.broadcastStoreUpdated(store)
-  await startStages(deps, result.run.id, result.stageIndices, isTest)
+  await startStages(deps, result.run.id, result.stageIndices)
   const latest = await mutateStore(store => store.orchestrationRunsById[result.run.id])
   return { store: latest.store, run: latest.result }
 }
@@ -187,7 +188,7 @@ export async function stopOrchestrationRun(deps: OrchestrationRuntimeDependencie
 
 export async function detectAndHandleStaleRuns(deps: OrchestrationRuntimeDependencies): Promise<void> {
   const timestamp = deps.now()
-  const staleRuns = await mutateStore(store => {
+  const { store, result: staleRunIds } = await mutateStore(store => {
     const stale = Object.values(store.orchestrationRunsById).filter(run => {
       return run.status === 'running' && (timestamp - run.updatedAt) > ORCHESTRATION_STALE_TIMEOUT_MS
     })
@@ -208,11 +209,9 @@ export async function detectAndHandleStaleRuns(deps: OrchestrationRuntimeDepende
     return stale.map(r => r.id)
   })
 
-  if (staleRuns.length > 0) {
-    deps.log.warn('orchestration-runtime:stale-runs-handled', { count: staleRuns.length, runIds: staleRuns })
-    // Broadcast using a temporary store reference from any active run if possible, 
-    // but usually deps.broadcastStoreUpdated is called with the modified store.
-    // Since mutateStore returns the updated store, let's adjust the function to return it.
+  if (staleRunIds.length > 0) {
+    deps.log.warn('orchestration-runtime:stale-runs-handled', { count: staleRunIds.length, runIds: staleRunIds })
+    await deps.broadcastStoreUpdated(store)
   }
 }
 
@@ -1028,13 +1027,18 @@ export function generateTestTrace(store: OpenTeamStore, runId: string): TestRunT
     const stage = flow.stages[sr.stageIndex]
     const roleResults = Object.entries(sr.roleRuns).map(([roleId, roleRun]) => {
       const role = store.rolesById[roleId]
-      const message = store.messagesById[roleRun.messageId]
-      const promptMsg = store.messagesById[roleRun.lastPromptMessageId]
+      const promptMsg = roleRun.messageId ? store.messagesById[roleRun.messageId] : undefined
+      const reply = promptMsg ? getChatMessages(store, chat).find(message =>
+        message.type === 'assistant' &&
+        message.roleId === roleId &&
+        message.sourceMessageId === promptMsg.id &&
+        message.orchestrationRunId === run.id,
+      ) : undefined
       return {
         roleId,
         roleName: role?.name ?? '未知人员',
         input: promptMsg?.content ?? '无输入',
-        output: message?.content ?? '无输出',
+        output: reply?.content ?? roleRun.error ?? '无输出',
         status: roleRun.status,
       }
     })

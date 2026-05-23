@@ -1,4 +1,5 @@
-import type { RoleToBackgroundMessage, RuntimeRoleStatus, type ReplyFailureReason } from '../group/runtimeProtocol'
+import type { RoleToBackgroundMessage, RuntimeRoleStatus } from '../group/runtimeProtocol'
+import type { ReplyFailureReason } from '../group/types'
 
 export function promptStatusMessage(
   status: RuntimeRoleStatus,

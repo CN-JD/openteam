@@ -1,4 +1,4 @@
-import type { ChatSiteAdapter, ConversationSnapshot } from './types'
+import type { ChatSiteAdapter, ConversationSnapshot, SiteStatusInfo } from './types'
 import { keepDeepestResponseContainers } from '../responseContainers'
 import { findClickableCopyButton, readResponseTextFromCopyAction } from './clipboardCopy'
 import { readEditorText, setContentEditableText } from './contentEditable'
@@ -190,4 +190,3 @@ function checkClaudeStatus(): SiteStatusInfo {
 
   return { status: 'ready', timestamp }
 }
-
