@@ -3,7 +3,7 @@ import { findLatestCompensationCandidate, findLatestCompensationReply } from './
 import { createReplyTimeout } from './replyTimeout'
 import { createReplyTracker } from './replyTracker'
 import { resolveReportableReplyText, type ReportableReplyText } from './reportableReply'
-import { keepDeepestResponseContainers } from './responseContainers'
+import { countResponseContainers, keepDeepestResponseContainers } from './responseContainers'
 import type { ContentLogger } from './runtimeClient'
 import type { RoleSession } from './roleSession'
 import type { ChatSiteAdapter } from './sites/types'
@@ -37,12 +37,14 @@ export function createReplyObserver(options: {
   const { siteAdapter, roleSession, log } = options
   let promptBaselineContainers = new Set<Element>()
   let promptBaselineReplies = new Set<string>()
+  let promptBaselineContainerCount = 0
+  let promptBaselinePromptId = ''
   let replyPollingTimer: number | null = null
   let replyPollingInFlight = false
   const replyTracker = createReplyTracker()
-  const replyTimeout = createReplyTimeout(REPLY_TIMEOUT_MS, (messageId, failureReason) => {
+  const replyTimeout = createReplyTimeout(REPLY_TIMEOUT_MS, messageId => {
     const assignedRole = roleSession.getAssignedRole()
-    log.warn('reply-timeout', { messageId, roleId: assignedRole?.roleId, roleName: assignedRole?.roleName, reason: failureReason })
+    log.warn('reply-timeout', { messageId, roleId: assignedRole?.roleId, roleName: assignedRole?.roleName })
 
     const replyAttemptId = roleSession.getActiveReplyAttemptId()
     const activePrompt = roleSession.getActivePrompt()
@@ -67,10 +69,10 @@ export function createReplyObserver(options: {
         type: 'TEAM_ROLE_STATUS',
         status: 'error',
         ...statusIdentity,
-        error: failureReason,
+        error: `等待 ${siteAdapter.id} 回复超时（${Math.round(REPLY_TIMEOUT_MS / 1000)} 秒）`,
       })
       .catch(error => log.warn('reply-timeout:status-failed', { error: error instanceof Error ? error.message : String(error) }))
-    options.reportRoleError(messageId, failureReason, undefined, undefined, replyAttemptId)
+    options.reportRoleError(messageId, `等待 ${siteAdapter.id} 回复超时（${Math.round(REPLY_TIMEOUT_MS / 1000)} 秒）`, undefined, undefined, replyAttemptId)
     clearReplyPolling()
   })
 
@@ -83,18 +85,24 @@ export function createReplyObserver(options: {
     const replies = containers.map(container => siteAdapter.readResponseText(container)).filter(Boolean)
     promptBaselineContainers = new Set(containers)
     promptBaselineReplies = new Set(replies.map(reply => reply.trim()).filter(Boolean))
+    promptBaselineContainerCount = countResponseContainers(containers)
+    promptBaselinePromptId = messageId ?? ''
     replyTracker.seed(getConversationId(), replies)
     log.debug('reply-baseline:captured', {
       messageId,
       conversationId: getConversationId(),
       containerCount: promptBaselineContainers.size,
       replyCount: promptBaselineReplies.size,
+      positionalContainerCount: promptBaselineContainerCount,
+      promptId: promptBaselinePromptId,
     })
   }
 
   function clearPromptReplyBaseline(): void {
     promptBaselineContainers.clear()
     promptBaselineReplies.clear()
+    promptBaselineContainerCount = 0
+    promptBaselinePromptId = ''
   }
 
   function seedStoredRoleReplies(replies: string[] | undefined): void {
@@ -109,8 +117,19 @@ export function createReplyObserver(options: {
     if (!trimmed) return true
     if (promptBaselineReplies.has(trimmed)) return true
 
+    // Bug 1 fix: Use positional baseline (container index) as primary check.
+    // This survives DOM rebuilds because it doesn't rely on element references.
+    const currentContainers = siteAdapter.getResponseContainers()
+    const elementIndex = currentContainers.indexOf(element)
+    if (elementIndex >= 0 && elementIndex < promptBaselineContainerCount) {
+      return true
+    }
+
+    // Bug 4 fix: Remove element.contains(container) branch — it is too broad.
+    // A new element that wraps an old container would be incorrectly marked as baseline.
+    // Only keep: container === element (exact match) or container.contains(element) (element is inside baseline).
     for (const container of promptBaselineContainers) {
-      if (container === element || container.contains(element) || element.contains(container)) return true
+      if (container === element || container.contains(element)) return true
     }
 
     return false
